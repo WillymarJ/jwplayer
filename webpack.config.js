@@ -1,160 +1,142 @@
-/* jshint node: true */
-var webpack = require('webpack');
-var path = require('path');
-var env = process.env;
-var _ = require('lodash');
-var argv = require('minimist')(process.argv.slice(2));
+'use strict';
 
-var packageInfo = require('./package.json');
-var flashVersion = 18;
+/* eslint-env node */
+/* eslint no-process-env: 0 */
 
-function getBuildVersion(packageInfo) {
-    // Build Version: {major.minor.revision}
-    var metadata = '';
-    if (env.BUILD_NUMBER) {
-        var branch = env.GIT_BRANCH;
-        metadata = 'opensource';
-        if (branch) {
-            metadata += '_' + branch.replace(/^origin\//, '').replace(/[^0-9A-Za-z-]/g, '-');
-        }
-        metadata += '.' + env.BUILD_NUMBER;
-    } else {
-        var now = new Date();
-        now.setTime(now.getTime()-now.getTimezoneOffset()*60000);
-        metadata = 'local.' + now.toISOString().replace(/[\.\-:T]/g, '-').replace(/Z|\.\d/g, '');
-    }
-    return packageInfo.version +'+'+ metadata;
-}
+const webpack = require('webpack');
+const merge = require('webpack-merge');
+const addNamed = require('@babel/helper-module-imports').addNamed;
+const getBuildVersion = require('./build.version.js');
+const licensesNotice = require('./jwplayer.license.notice.js');
 
-var compileConstants =
-{
+const compileConstants = {
     __SELF_HOSTED__: true,
-    __REPO__ : '\'\'',
-    __DEBUG__ : false,
-    __BUILD_VERSION__: '\'' + getBuildVersion(packageInfo) + '\'',
-    __FLASH_VERSION__: flashVersion
+    __REPO__: `''`,
+    __DEBUG__: true,
+    __BUILD_VERSION__: `'${getBuildVersion()}'`,
+    __FLASH_VERSION__: 18
 };
 
-var uglifyJsOptions = {
-    screwIE8: true,
-    stats: true,
-    compress: {
-        warnings: false
+const webpackConfig = {
+    mode: 'none',
+    node: false,
+    entry: {
+        jwplayer: './src/js/jwplayer.js'
     },
-    mangle: {
-        toplevel: true,
-        eval: true,
-        except: ['export', 'require']
-    }
+    output: {
+        filename: '[name].js',
+        library: 'jwplayer',
+        libraryExport: 'default',
+        libraryTarget: 'window',
+        umdNamedDefine: true
+    },
+    optimization: {
+        splitChunks: false
+    },
+    resolve: {
+        modules: [
+            'src/js/',
+            'src',
+            'node_modules'
+        ]
+    },
+    module: {
+        strictExportPresence: true,
+        rules: [
+            {
+                test: /\.less$/,
+                use: [
+                    'simple-style-loader',
+                    {
+                        loader: 'css-loader',
+                        options: {
+                            importLoaders: 1
+                        }
+                    },
+                    'postcss-loader',
+                    {
+                        loader: 'less-loader',
+                        options: {
+                            compress: true,
+                            strictMath: true,
+                            noIeCompat: true
+                        }
+                    }
+                ]
+            },
+            {
+                test: /\.svg$/,
+                loader: 'svg-inline-loader'
+            },
+            {
+                test: /\.js$/,
+                exclude: /\/node_modules\//,
+                use: {
+                    loader: 'babel-loader',
+                    options: {
+                        babelrc: false,
+                        presets: ['@babel/preset-env'],
+                        plugins: [
+                            {
+                                visitor: {
+                                    CallExpression: function(path) {
+                                        if (path.get('callee').matchesPattern('Object.assign')) {
+                                            path.node.callee = addNamed(path, 'extend', 'utils/underscore');
+                                        }
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        ]
+    },
+    plugins: [
+        new webpack.BannerPlugin({
+            banner: `/*!\n${licensesNotice}\n*/`,
+            raw: true,
+            include: /^.*.js$/
+        })
+    ]
 };
 
-var multiConfig = _.compact(_.map([
+const configVariants = [
     {
         name: 'debug',
+        mode: 'development',
+        devtool: 'cheap-module-source-map',
         output: {
-            path: 'bin-debug/',
-            filename: '[name].js',
-            chunkFilename:'[name].js',
-            sourceMapFilename : '[name].[hash].map',
-            library: 'jwplayer',
-            libraryTarget: 'umd',
+            path: `${__dirname}/bin-debug/`,
+            sourceMapFilename: '[name].[hash].map',
             pathinfo: true
         },
-        debug: true,
-        devtool: 'source-map',
         plugins: [
-            new webpack.DefinePlugin(_.defaults({
-                __DEBUG__ : true
-            }, compileConstants))
+            new webpack.DefinePlugin(Object.assign({}, compileConstants, {
+                __DEBUG__: true
+            }))
         ]
     },
     {
         name: 'release',
+        mode: 'production',
         output: {
-            path: 'bin-release/',
-            filename: '[name].js',
-            chunkFilename: '[name].js',
-            sourceMapFilename : '[name].[hash].map',
-            library: 'jwplayer',
-            libraryTarget: 'umd'
+            path: `${__dirname}/bin-release/`
         },
-        watch: false,
-        progress: false,
         plugins: [
-            new webpack.DefinePlugin(compileConstants),
-            new webpack.optimize.OccurrenceOrderPlugin(),
-            new webpack.optimize.UglifyJsPlugin(uglifyJsOptions)
+            new webpack.DefinePlugin(compileConstants)
         ]
     }
-], function(configuration) {
-    // Use `webpack --only {CONFIG_NAME}` to filter out multiple configurations
-    //  ex: `webpack --only debug` will only return and build the debug config
-    if (argv.only) {
-        if (configuration.name !== argv.only) {
-            return;
+];
+
+module.exports = (envArgs) => {
+    if (envArgs) {
+        const variantName = Object.keys(envArgs)[0];
+        const selected = configVariants.find(variant => variant.name === variantName);
+        if (selected) {
+            return merge(webpackConfig, selected);
         }
     }
+    return configVariants.map(variant => merge(webpackConfig, variant));
+};
 
-    return _.defaultsDeep(configuration, {
-        entry: {
-            // the array notation is required due to bug in webpack :
-            //    https://github.com/webpack/webpack/issues/300
-            jwplayer: ['./src/js/jwplayer.js']
-        },
-        output: {
-            // This would allow loading of modules from our CDN
-            //crossOriginLoading: 'anonymous'
-        },
-        umdNamedDefine: true,
-        stats: {
-            timings: true
-        },
-        devtool: 'cheap-source-map',
-        resolve: {
-            modulesDirectories: [
-                'src/js/',
-                'src',
-                'node_modules'
-            ]
-        },
-        module: {
-            loaders: [
-                {
-                    test: /\.less$/,
-                    loaders: [
-                        'simple-style-loader',
-                        'css',
-                        'postcss-loader',
-                        'less?compress'
-                    ]
-                },
-                {
-                    test: /\.woff(\?v=\d+\.\d+\.\d+)?$/,
-                    loader: 'file-loader?name=[name].[ext]'
-                },
-                {
-                    test: /\.ttf(\?v=\d+\.\d+\.\d+)?$/,
-                    loader: 'file-loader?name=[name].[ext]'
-                },
-                {
-                    test: /\.js/,
-                    exclude: /node_modules/,
-                    query: {
-                        presets: ['es2015']
-                    },
-                    loader: 'babel-loader'
-                }
-            ]
-        }
-    });
-}));
-
-// When only returning one config, return the object.
-// This provides flat webpack output can be opened in the analyze tool.
-// Example: `webpack --only debug -j > output.json`
-//  and open output.json at http://webpack.github.io/analyse/
-if (multiConfig.length === 1) {
-    multiConfig = multiConfig[0];
-}
-
-module.exports = multiConfig;

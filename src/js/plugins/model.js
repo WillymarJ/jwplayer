@@ -1,21 +1,43 @@
-define([
-    'plugins/utils',
-    'plugins/plugin'
-], function(pluginsUtils, Plugin) {
+import Plugin from 'plugins/plugin';
+import { log } from 'utils/log';
+import { getPluginName } from 'plugins/utils';
 
-    var PluginModel = function (plugins) {
-        this.addPlugin = function (url) {
-            var pluginName = pluginsUtils.getPluginName(url);
-            if (!plugins[pluginName]) {
-                plugins[pluginName] = new Plugin(url);
-            }
-            return plugins[pluginName];
-        };
+const pluginsRegistered = {};
+const PluginModel = function() {};
+const prototype = PluginModel.prototype;
 
-        this.getPlugins = function () {
-            return plugins;
-        };
-    };
+prototype.setupPlugin = function(url) {
+    const registeredPlugin = this.getPlugin(url);
+    if (registeredPlugin) {
+        if (registeredPlugin.url !== url) {
+            log(`JW Plugin "${getPluginName(url)}" already loaded from "${registeredPlugin.url}". Ignoring "${url}."`);
+        }
+        return registeredPlugin.promise;
+    }
+    const plugin = this.addPlugin(url);
+    return plugin.load();
+};
 
-    return PluginModel;
-});
+prototype.addPlugin = function(url) {
+    const pluginName = getPluginName(url);
+    let plugin = pluginsRegistered[pluginName];
+    if (!plugin) {
+        plugin = new Plugin(url);
+        pluginsRegistered[pluginName] = plugin;
+    }
+    return plugin;
+};
+
+prototype.getPlugin = function(url) {
+    return pluginsRegistered[getPluginName(url)];
+};
+
+prototype.removePlugin = function(url) {
+    delete pluginsRegistered[getPluginName(url)];
+};
+
+prototype.getPlugins = function() {
+    return pluginsRegistered;
+};
+
+export default PluginModel;

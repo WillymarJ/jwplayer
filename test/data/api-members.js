@@ -1,12 +1,13 @@
-define([
-    'utils/underscore'
-], function(_) {
-    return {
-        id: '',
-        version: '',
-        _qoe: {},
-        utils: {},
-        Events: {},
-        _: _
-    };
-});
+import _ from 'utils/underscore';
+
+export default {
+    version: '',
+    id: '',
+    uniqueId: 0,
+    _qoe: {},
+    _events: {},
+    Events: function() {},
+    utils: {},
+    _: _,
+    plugins: {}
+};

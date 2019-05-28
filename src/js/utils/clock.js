@@ -1,44 +1,18 @@
-define([], function() {
+import { now as getTime } from 'utils/date';
 
-    var performance = window.performance;
+const performance = window.performance || {
+    timing: {}
+};
+const startDate = performance.timing.navigationStart || getTime();
 
-    var supportsPerformance = !!(performance && performance.now);
-    
-    var MAX_INTERVAL = 1000;
+if (!('now' in performance)) {
+    performance.now = () => (getTime() - startDate);
+}
 
-    var getTime = function() {
-        if (supportsPerformance) {
-            return performance.now();
-        }
-        return new Date().getTime();
-    };
+export function now() {
+    return performance.now();
+}
 
-    var Clock = function() {
-        var started = getTime();
-        var updated = started;
-
-        var updateClock = function() {
-            var delta = getTime() - updated;
-            if (delta > MAX_INTERVAL) {
-                delta = MAX_INTERVAL;
-            } else if (delta < 0) {
-                delta = 0;
-            }
-            updated += delta;
-        };
-        setInterval(updateClock, 50);
-
-        Object.defineProperty(this, 'currentTime', {
-            get: function() {
-                updateClock();
-                return updated - started;
-            }
-        });
-    };
-
-    Clock.prototype.now = function() {
-        return this.currentTime;
-    };
-
-    return new Clock();
-});
+export function dateTime() {
+    return startDate + performance.now();
+}

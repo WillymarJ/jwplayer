@@ -1,68 +1,105 @@
-define([
-    'utils/strings',
-    'utils/underscore',
-    'utils/browser',
-    'utils/dom',
-    'utils/css',
-    'utils/parser',
-    'utils/id3Parser',
-    'utils/ajax',
-    'utils/validator',
-    'utils/playerutils',
-    'utils/trycatch',
-    'utils/stream-type',
-    'utils/quality-labels'
-], function(strings, _, browser, dom, css, parser, id3Parser, ajax, validator, playerutils, trycatch, streamType, qualityLabels) {
-    var utils = {};
+import * as playerutils from 'utils/playerutils';
+import * as validator from 'utils/validator';
+import * as parser from 'utils/parser';
+import {
+    trim,
+    pad,
+    extension,
+    hms,
+    seconds,
+    prefix,
+    suffix,
+} from 'utils/strings';
+import Timer from 'api/timer';
+import { tryCatch, JwError as Error } from 'utils/trycatch';
+import { indexOf } from 'utils/underscore';
+import { isIframe, flashVersion } from 'utils/browser';
+import {
+    addClass,
+    hasClass,
+    removeClass,
+    replaceClass,
+    toggleClass,
+    classList,
+    styleDimension,
+    createElement,
+    emptyElement,
+    addStyleSheet,
+    bounds,
+    openLink,
+} from 'utils/dom';
+import {
+    css,
+    clearCss,
+    style,
+    transform,
+    getRgba
+} from 'utils/css';
+import { ajax } from 'utils/ajax';
+import { between } from 'utils/math';
+import { log } from 'utils/log';
 
-    utils.log = function () {
-        /* eslint no-console: 0 */
-        if (!window.console) {
-            return;
+// TODO: deprecate (jwplayer-ads-vast uses utils.crossdomain(url))
+function crossdomain(uri) {
+    const a = document.createElement('a');
+    const b = document.createElement('a');
+    a.href = location.href;
+    try {
+        b.href = uri;
+        b.href = b.href; /* IE fix for relative urls */ // eslint-disable-line no-self-assign
+        return a.protocol + '//' + a.host !== b.protocol + '//' + b.host;
+    } catch (e) {/* swallow */}
+    return true;
+}
+
+// The predicate received the arguments (key, value) instead of (value, key)
+const foreach = function (aData, fnEach) {
+    for (let key in aData) {
+        if (Object.prototype.hasOwnProperty.call(aData, key)) {
+            fnEach(key, aData[key]);
         }
-        if (typeof console.log === 'object') {
-            console.log(Array.prototype.slice.call(arguments, 0));
-        } else {
-            console.log.apply(console, arguments);
-        }
-    };
+    }
+};
 
-    utils.between = function (num, min, max) {
-        return Math.max(Math.min(num, max), min);
-    };
+const noop = function () {};
 
-    /**
-     * Iterates over an object and executes a callback function for each property (if it exists)
-     * This is a safe way to iterate over objects if another script has modified the object prototype
-     */
-    utils.foreach = function (aData, fnEach) {
-        var key;
-        var val;
-
-        for (key in aData) {
-            if (utils.typeOf(aData.hasOwnProperty) === 'function') {
-                if (aData.hasOwnProperty(key)) {
-                    val = aData[key];
-                    fnEach(key, val);
-                }
-            } else {
-                // IE8 has a problem looping through XML nodes
-                val = aData[key];
-                fnEach(key, val);
-            }
-        }
-    };
-
-    utils.indexOf = _.indexOf;
-    utils.noop = function () {
-    };
-
-    utils.seconds = strings.seconds;
-    utils.prefix = strings.prefix;
-    utils.suffix = strings.suffix;
-
-    _.extend(utils, parser, id3Parser, validator, browser, ajax, dom, css, playerutils, trycatch, streamType, qualityLabels);
-
-    return utils;
+const helpers = Object.assign({}, parser, validator, playerutils, {
+    addClass,
+    hasClass,
+    removeClass,
+    replaceClass,
+    toggleClass,
+    classList,
+    styleDimension,
+    createElement,
+    emptyElement,
+    addStyleSheet,
+    bounds,
+    openLink,
+    css,
+    clearCss,
+    style,
+    transform,
+    getRgba,
+    ajax,
+    crossdomain,
+    tryCatch,
+    Error,
+    Timer,
+    log,
+    between,
+    foreach,
+    flashVersion,
+    isIframe,
+    indexOf,
+    trim,
+    pad,
+    extension,
+    hms,
+    seconds,
+    prefix,
+    suffix,
+    noop
 });
 
+export default helpers;

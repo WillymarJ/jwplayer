@@ -1,69 +1,59 @@
-define([
-    'utils/trycatch'
-], function (trycatch) {
-    /* jshint qunit: true */
+import ApiSettings from 'api/api-settings';
+import { tryCatch, JwError } from 'utils/trycatch';
 
-    QUnit.module('trycatch');
-    var test = QUnit.test.bind(QUnit);
+describe('trycatch', function() {
 
-    test('defines', function(assert) {
-        assert.expect(2);
-
-        assert.equal(typeof trycatch.tryCatch, 'function', 'trycatch function is defined');
-        assert.equal(typeof trycatch.Error, 'function', 'Error function is defined');
+    it('defines', function() {
+        expect(tryCatch, 'trycatch function is defined').to.be.a('function');
+        expect(JwError, 'Error function is defined').to.be.a('function');
     });
 
-    test('calling', function(assert) {
-        assert.expect(2);
-
-        var x = {};
-        var status = trycatch.tryCatch(function() {
-            x.error();
-        });
-
-        assert.ok(status instanceof trycatch.Error, 'returns instance of trycatch.Error when exception is thrown');
-
-        var value = trycatch.tryCatch(function() {
+    it('should not throw Error for valid call', function() {
+        const value = tryCatch(function() {
             return 1;
         });
 
-        assert.strictEqual(value, 1, 'returns value returned by function argument when no exception is thrown');
+        expect(value, 'returns value returned by function argument when no exception is thrown').to.equal(1);
     });
 
-    test('calling in debug mode', function(assert) {
-        assert.expect(1);
+    it('should return JwError when there is an exception', function() {
+        const error = new Error('Danger, Danger, Will Robinson!');
+        let exceptionThrown = false;
+        let jwError = null;
 
-        // store previous global/jwplayer settings
-        var jwplayerToRestore = window.jwplayer;
-        var jwplayer = jwplayerToRestore || {};
-        window.jwplayer = jwplayer;
-        var debug = jwplayer.debug;
-        jwplayer.debug = true;
-
-        var trycatchThrow = function() {
-            var x = {};
-            trycatch.tryCatch(function() {
-                x.error();
+        const trycatchThrow = function() {
+            jwError = tryCatch(function () {
+                exceptionThrown = true;
+                throw error;
             });
         };
 
-        assert.throws(trycatchThrow, Error, 'throws exceptions');
-
-
-        // restore previous global/jwplayer settings
-        jwplayer.debug = debug;
-        window.jwplayer = jwplayerToRestore;
-
-    });
-
-    test('Error', function(assert) {
-        assert.expect(2);
-
-        var error = new trycatch.Error('error name', 'error message');
-
-        assert.equal(error.name, 'error name', 'error.name is set');
-        assert.equal(error.message, 'error message', 'error.message is set');
+        expect(trycatchThrow).to.not.throw();
+        expect(exceptionThrown).to.be.true;
+        expect(jwError.message).to.equal('Danger, Danger, Will Robinson!');
     });
 
 
+    it('should throw Error in debug mode', function() {
+        const error = new Error('Error');
+        const debug = ApiSettings.debug;
+        ApiSettings.debug = true;
+
+        const trycatchThrow = function() {
+            tryCatch(function() {
+                throw error;
+            });
+        };
+
+        expect(trycatchThrow).to.throw(error);
+
+        ApiSettings.debug = debug;
+    });
+
+    it('Error', function() {
+        const error = new JwError('error name', 'error message');
+
+        expect(error.name, 'error.name is set').to.equal('error name');
+        expect(error.message, 'error.message is set').to.equal('error message');
+    });
 });

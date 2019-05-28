@@ -1,6 +1,6 @@
-define({
-    tagged : {
-        file : 'sample',
-        type : 'flv'
+export default {
+    tagged: {
+        file: 'sample',
+        type: 'flv'
     }
-});
+};

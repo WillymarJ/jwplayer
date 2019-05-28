@@ -1,78 +1,92 @@
-define([
-    'utils/underscore'
-], function(_) {
-    var validator = {};
+/** @module */
 
-    // Returns true if the value of the object is null, undefined or the empty string
-    validator.exists = function (item) {
-        switch (typeof (item)) {
-            case 'string':
-                return (item.length > 0);
-            case 'object':
-                return (item !== null);
-            case 'undefined':
+const protocol = window.location.protocol;
+
+/**
+ * @param {any} item - The variable to test.
+ * @returns {boolean} Is the value of `item` null, undefined or an empty string?
+ */
+export function exists(item) {
+    switch (typeof (item)) {
+        case 'string':
+            return (item.length > 0);
+        case 'object':
+            return (item !== null);
+        case 'undefined':
+            return false;
+        default:
+            return true;
+    }
+}
+
+/**
+ * @returns {boolean} Is the current page hosted over HTTPS?
+ */
+export function isHTTPS() {
+    return protocol === 'https:';
+}
+
+/**
+ * @returns {boolean} Is the current page hosted over the File protocol?
+ */
+export function isFileProtocol() {
+    return protocol === 'file:';
+}
+
+/**
+ * @param {string} file - The path or url to a media file
+ * @param {string} type - The type of the media parsed from a feed or the file extension.
+ * @returns {boolean} Is `file` an RTMP link or does `type` equal 'rtmp'?
+ */
+export function isRtmp(file, type) {
+    return (file.indexOf('rtmp:') === 0 || type === 'rtmp');
+}
+
+/**
+ * @param {string} path - The path or url to a media file
+ * @param {string} type - The type of the media parsed from a feed or the media url.
+ * @returns {boolean} Is `path` a YouTube link or does `type` equal 'youtube'?
+ */
+export function isYouTube(path, type) {
+    return (type === 'youtube') || (/^(http|\/\/).*(youtube\.com|youtu\.be)\/.+/).test(path);
+}
+
+/**
+ * @param {string} value - The variable to test.
+ * @returns {string} The typeof object, 'array' or 'null'.
+ */
+export function typeOf(value) {
+    if (value === null) {
+        return 'null';
+    }
+    const typeofString = typeof value;
+    if (typeofString === 'object') {
+        if (Array.isArray(value)) {
+            return 'array';
+        }
+    }
+    return typeofString;
+}
+
+/**
+ * Indicates whether or not the customObj has *at least* the same keys as the defaultObj; the customObj could have more keys.
+ * @param {object} defaultObj - The object that determines the desired set of keys.
+ * @param {object} customObj - The object we want to verify has, at least, the same keys as defaultObj.
+ * @param {function} predicate - The function evaluating whether the property has a valid value and can be considered compliant. Inputs are the object and its key.
+ * @returns {boolean} Does the customObj have at least the same keys as defaultObj, and do their properties also share the same keys ?
+ */
+export function isDeepKeyCompliant(defaultObj, customObj, predicate) {
+    const defaultKeys = Object.keys(defaultObj);
+    return Object.keys(customObj).length >= defaultKeys.length &&
+        defaultKeys.every(key => {
+            const defaultValue = defaultObj[key];
+            const customValue = customObj[key];
+            if (defaultValue && typeof defaultValue === 'object') {
+                if (customValue && typeof customValue === 'object') {
+                    return isDeepKeyCompliant(defaultValue, customValue, predicate);
+                }
                 return false;
-            default:
-                return true;
-        }
-    };
-
-    /** Determines if the current page is HTTPS **/
-    validator.isHTTPS = function () {
-        return (window.location.href.indexOf('https') === 0);
-    };
-
-    /**
-     * Determines if a URL is an RTMP link
-     */
-    validator.isRtmp = function (file, type) {
-        return (file.indexOf('rtmp') === 0 || type === 'rtmp');
-    };
-
-    /**
-     * Determines if a URL is a YouTube link
-     */
-    validator.isYouTube = function (path, type) {
-        return (type === 'youtube') || (/^(http|\/\/).*(youtube\.com|youtu\.be)\/.+/).test(path);
-    };
-
-    /**
-     * Returns a YouTube ID from a number of YouTube URL formats:
-     *
-     * Matches the following YouTube URL types:
-     *  - http://www.youtube.com/watch?v=YE7VzlLtp-4
-     *  - http://www.youtube.com/watch?v=YE7VzlLtp-4&extra_param=123
-     *  - http://www.youtube.com/watch#!v=YE7VzlLtp-4
-     *  - http://www.youtube.com/watch#!v=YE7VzlLtp-4?extra_param=123&another_param=456
-     *  - http://www.youtube.com/v/YE7VzlLtp-4
-     *  - http://www.youtube.com/v/YE7VzlLtp-4?extra_param=123&another_param=456
-     *  - http://youtu.be/YE7VzlLtp-4
-     *  - http://youtu.be/YE7VzlLtp-4?extra_param=123&another_param=456
-     *  - YE7VzlLtp-4
-     **/
-    validator.youTubeID = function (path) {
-        // Left as a dense regular expression for brevity.
-        var matches = (/v[=\/]([^?&]*)|youtu\.be\/([^?]*)|^([\w-]*)$/i).exec(path);
-        if (!matches) {
-            return '';
-        }
-        return matches.slice(1).join('').replace('?', '');
-    };
-
-
-    /** Returns the true type of an object * */
-    validator.typeOf = function (value) {
-        if (value === null) {
-            return 'null';
-        }
-        var typeofString = typeof value;
-        if (typeofString === 'object') {
-            if (_.isArray(value)) {
-                return 'array';
             }
-        }
-        return typeofString;
-    };
-
-    return validator;
-});
+            return predicate(key, defaultObj);
+        });
+}

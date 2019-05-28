@@ -1,88 +1,90 @@
-define([
-    'test/underscore',
-    'jquery',
-    'jwplayer'
-], function (_, $, jwplayer) {
-    /* jshint qunit: true */
+import _ from 'test/underscore';
+import jwplayer from 'jwplayer';
 
-    QUnit.module('jwplayer function');
-    var test = QUnit.test.bind(QUnit);
+function testInstanceOfApi(api) {
+    expect(api).to.be.an('object');
+    expect(api.setup).to.be.a('function');
+    return api;
+}
 
-    var append = function(html) {
-        var $element = $(html);
-        $('#qunit-fixture').append($element);
-        return $element[0];
-    };
+describe('jwplayer function', function() {
 
-    var testInstanceOfApi = function(assert, api) {
-        assert.ok(_.isObject(api), 'jwplayer({dom id}) returned an object');
-        assert.ok(_.isFunction(api.setup), 'object.setup is a function');
-        return api;
-    };
+    beforeEach(function() {
+        // add fixture
+        const fixture = document.createElement('div');
+        fixture.id = 'test-container';
+        const playerContainer = document.createElement('div');
+        playerContainer.id = 'player';
+        fixture.appendChild(playerContainer);
+        document.body.appendChild(fixture);
+    });
 
-    test('is defined', function(assert) {
+    afterEach(function() {
+        // remove all test players
+        for (let i = 10; i--;) {
+            let player = jwplayer();
+            if (player.remove) {
+                player.remove();
+            }
+        }
+        // remove fixture
+        const fixture = document.querySelector('#test-container');
+        document.body.removeChild(fixture);
+    });
+
+    it('is defined', function() {
         // Test jwplayer module
-        assert.ok(_.isFunction(jwplayer), 'jwplayer is a function');
+        expect(jwplayer).to.be.a('function');
     });
 
-    test('allows plugins to register when no player is found', function(assert) {
-        var x = jwplayer();
+    it('allows plugins to register when no player is found', function() {
+        const x = jwplayer();
 
         // It might be preferable to always return an API instance
         // even one not set to replace an element
-        assert.ok(_.isObject(x), 'jwplayer({dom id}) returned an object');
-        assert.ok(_.isFunction(x.registerPlugin), 'object.registerPlugin is a function');
-        assert.strictEqual(x.setup, undefined, 'object.setup is not defined');
+        expect(x).to.be.an('object');
+        expect(x).to.have.property('registerPlugin').which.is.a('function');
+        expect(x).to.not.have.property('setup');
     });
 
-    test('handles invalid queries by returning an object plugins can register', function(assert) {
+    it('handles invalid queries by returning an object plugins can register', function() {
         // test invalid queries after a player is setup
-        append('<div id="player"></div>');
+        jwplayer('player');
 
-        var a = jwplayer('player');
-
-        var x = jwplayer('not a valid player id');
+        const x = jwplayer('not a valid player id');
 
         // It might be preferable to always return an API instance
         // even one not set to replace an element
-        assert.ok(_.isObject(x), 'jwplayer({dom id}) returned an object');
-        assert.ok(_.isFunction(x.registerPlugin), 'object.registerPlugin is a function');
-        assert.strictEqual(x.setup, undefined, 'object.setup is not defined');
-
-        a.remove();
+        expect(x).to.be.an('object');
+        expect(x).to.have.property('registerPlugin').which.is.a('function');
+        expect(x).to.not.have.property('setup');
     });
 
-    test('returns a new api instance when given an element id', function(assert) {
-        append('<div id="player"></div>');
-
-        testInstanceOfApi( assert, jwplayer('player') ).remove();
+    it('returns a new api instance when given an element id', function() {
+        testInstanceOfApi(jwplayer('player'));
     });
 
-    test('returns a new api instance when given an element with an id', function(assert) {
-        var element = append('<div id="player"></div>');
-
-        testInstanceOfApi( assert, jwplayer(element) ).remove();
+    it('returns a new api instance when given an element with an id', function() {
+        const element = document.querySelector('#player');
+        testInstanceOfApi(jwplayer(element));
     });
 
-    test('returns a new api instance when given an element with no id not in the DOM', function(assert) {
-        var element = $('<div></div>')[0];
-
-        var x = testInstanceOfApi( assert, jwplayer(element) );
+    it('returns a new api instance when given an element with no id not in the DOM', function() {
+        const element = document.createElement('div');
+        const x = testInstanceOfApi(jwplayer(element));
 
         // FIXME: this only works with one player whose id is empty ""
         // TODO: create a lookup table for players? or put the unique id on the element?
-        assert.strictEqual(x, jwplayer(element), 'element selection returns the same instance even without an id');
-
-        x.remove();
+        expect(x, 'element selection returns the same instance even without an id').to.equal(jwplayer(element));
     });
 
-    test('returns the same api instance for matching queries', function(assert) {
-        var element = append('<div id="player"></div>');
+    it('returns the same api instance for matching queries', function() {
+        const element = document.querySelector('#player');
 
-        var x = jwplayer('player');
-        var y = jwplayer($('<div></div>')[0]);
+        const x = jwplayer('player');
+        const y = jwplayer(document.createElement('div'));
 
-        var uniquePlayers = _.uniq([
+        const uniquePlayers = _.uniq([
             x,
             jwplayer(0),
             jwplayer(),
@@ -93,14 +95,10 @@ define([
             jwplayer(false)
         ]);
 
+        expect(uniquePlayers.length, 'all queries return the same instance').to.equal(1);
+        expect(jwplayer(0), 'jwplayer(0) returns the first player').to.equal(x);
+        expect(jwplayer(1), 'jwplayer(1) returns the seconds player').to.equal(y);
 
-        assert.equal(uniquePlayers.length, 1, 'all queries return the same instance');
-        assert.strictEqual(jwplayer(0), x, 'jwplayer(0) returns the first player');
-        assert.strictEqual(jwplayer(1), y, 'jwplayer(1) returns the seconds player');
-
-        assert.ok(x !== y, 'first player instance does not equal second instance');
-
-        x.remove();
-        y.remove();
+        expect(x, 'first player instance does not equal second instance').to.not.equal(y);
     });
 });

@@ -1,49 +1,78 @@
-define([
-    'utils/stream-type'
-], function (streamTypeUtil) {
-    /* jshint qunit: true */
-    QUnit.module('stream-type');
-    var test = QUnit.test.bind(QUnit)
+import { streamType, isDvr } from 'providers/utils/stream-type';
 
-    test('stream-type.streamType', function(assert) {
-        var minDvrWindow = 120;
-        var type = streamTypeUtil.streamType(0, minDvrWindow);
-        assert.equal(type, 'VOD', 'streamType with 0 and 120');
+describe('stream-type', function() {
 
-        type = streamTypeUtil.streamType(0, 0);
-        assert.equal(type, 'VOD', 'streamType with 0 and 0');
+    it('determines streamType', function() {
+        const minDvrWindow = 120;
+        let type = streamType(0, minDvrWindow);
+        expect(type, 'streamType with 0 and 120').to.equal('VOD');
 
-        type = streamTypeUtil.streamType(10, minDvrWindow);
-        assert.equal(type, 'VOD', 'streamType with 10 and 120');
+        type = streamType(0, 0);
+        expect(type, 'streamType with 0 and 0').to.equal('VOD');
 
-        type = streamTypeUtil.streamType(10, undefined);
-        assert.equal(type, 'VOD', 'streamType with 10 and undefined');
+        type = streamType(10, minDvrWindow);
+        expect(type, 'streamType with 10 and 120').to.equal('VOD');
 
-        type = streamTypeUtil.streamType(-120, minDvrWindow);
-        assert.equal(type, 'DVR', 'streamType with -120 and 120');
+        type = streamType(10, undefined);
+        expect(type, 'streamType with 10 and undefined').to.equal('VOD');
 
-        type = streamTypeUtil.streamType(-120, -10);
-        assert.equal(type, 'DVR', 'streamType with 120 and -10');
+        type = streamType(-120, minDvrWindow);
+        expect(type, 'streamType with -120 and 120').to.equal('DVR');
 
-        type = streamTypeUtil.streamType(-120, 0);
-        assert.equal(type, 'DVR', 'streamType with 120 and 0');
+        type = streamType(-120, -10);
+        expect(type, 'streamType with 120 and -10').to.equal('DVR');
 
-        type = streamTypeUtil.streamType(-120, 0);
-        assert.equal(type, 'DVR', 'streamType with -120 and 0');
+        type = streamType(-120, 0);
+        expect(type, 'streamType with 120 and 0').to.equal('DVR');
 
-        type = streamTypeUtil.streamType(-120, undefined);
-        assert.equal(type, 'DVR', 'streamType with 120 and undefined');
+        type = streamType(-120, 0);
+        expect(type, 'streamType with -120 and 0').to.equal('DVR');
 
-        type = streamTypeUtil.streamType(-20, minDvrWindow);
-        assert.equal(type, 'LIVE', 'streamType with -20 and 120');
+        type = streamType(-120, undefined);
+        expect(type, 'streamType with 120 and undefined').to.equal('DVR');
 
-        type = streamTypeUtil.streamType(-1, minDvrWindow);
-        assert.equal(type, 'LIVE', 'streamType with -1 and 120');
+        type = streamType(-20, minDvrWindow);
+        expect(type, 'streamType with -20 and 120').to.equal('LIVE');
 
-        type = streamTypeUtil.streamType(Infinity, minDvrWindow);
-        assert.equal(type, 'LIVE', 'streamType with Infinity');
+        type = streamType(-1, minDvrWindow);
+        expect(type, 'streamType with -1 and 120').to.equal('LIVE');
 
-        type = streamTypeUtil.streamType(-20, undefined);
-        assert.equal(type, 'LIVE', 'streamType with -20 and undefined');
+        type = streamType(Infinity, minDvrWindow);
+        expect(type, 'streamType with Infinity').to.equal('LIVE');
+
+        type = streamType(-20, undefined);
+        expect(type, 'streamType with -20 and undefined').to.equal('LIVE');
     });
-})
+
+    it('determines isDvr', function() {
+        const minDvrWindow = 120;
+        let dvrMode;
+
+        dvrMode = isDvr(0, minDvrWindow);
+        expect(dvrMode, 'expect false when duration is less than minDvrWindow').to.equal(false);
+
+        dvrMode = isDvr(Infinity, minDvrWindow);
+        expect(dvrMode, 'expect false when duration is Infinity').to.equal(false);
+
+        dvrMode = isDvr(-110, minDvrWindow);
+        expect(dvrMode, 'expect false when absolute duration is less than minDvrWindow').to.equal(false);
+
+        dvrMode = isDvr(10, undefined);
+        expect(dvrMode, 'expect false when duration is greater than 0 and minDvrWindow is undefined').to.equal(false);
+
+        dvrMode = isDvr(-10, undefined);
+        expect(dvrMode, 'expect false when duration is less than 0 and minDvrWindow is undefined').to.equal(false);
+
+        dvrMode = isDvr(0, 0);
+        expect(dvrMode, 'expect true when duration is equal to minDvrWindow').to.equal(true);
+
+        dvrMode = isDvr(-120, minDvrWindow);
+        expect(dvrMode, 'expect true when absolute duration equals minDvrWindow').to.equal(true);
+
+        dvrMode = isDvr(-60, -10);
+        expect(dvrMode, 'expect true when absolute duration is greater than negative minDvrWindow').to.equal(true);
+
+        dvrMode = isDvr(-60, 0);
+        expect(dvrMode, 'expect true when absolute duration is greater than minDvrWindow').to.equal(true);
+    });
+});

@@ -1,9 +1,6 @@
-define([
-    'utils/time-ranges'
-], function (timeRangesUtil) {
-    /* jshint qunit: true */
-    QUnit.module('time-ranges');
-    var test = QUnit.test.bind(QUnit);
+import endOfRange from 'utils/time-ranges';
+
+describe('time-ranges', function() {
 
     function MockTimeRanges(ranges) {
         return {
@@ -17,35 +14,35 @@ define([
         };
     }
 
-    test('returns the end when there is one range', function (assert) {
-        var mockRanges = MockTimeRanges([{start: 1, end: 2}]);
-        var expected = 2;
-        var actual = timeRangesUtil.endOfRange(mockRanges);
+    it('returns the end when there is one range', function() {
+        const mockRanges = MockTimeRanges([{ start: 1, end: 2 }]);
+        const expected = 2;
+        const actual = endOfRange(mockRanges);
 
-        assert.deepEqual(actual, expected);
+        expect(expected).to.deep.equal(actual);
     });
 
-    test('returns the end when there are multiple ranges', function (assert) {
-        var mockRanges = MockTimeRanges([{start: 1, end: 2}, {start: 3, end: 4}]);
-        var expected = 4;
-        var actual = timeRangesUtil.endOfRange(mockRanges);
+    it('returns the end when there are multiple ranges', function() {
+        const mockRanges = MockTimeRanges([{ start: 1, end: 2 }, { start: 3, end: 4 }]);
+        const expected = 4;
+        const actual = endOfRange(mockRanges);
 
-        assert.deepEqual(actual, expected);
+        expect(expected).to.deep.equal(actual);
     });
 
-    test('returns 0 when there are no ranges', function (assert) {
-        var mockRanges = MockTimeRanges([]);
-        var expected = 0;
-        var actual = timeRangesUtil.endOfRange(mockRanges);
+    it('returns 0 when there are no ranges', function() {
+        const mockRanges = MockTimeRanges([]);
+        const expected = 0;
+        const actual = endOfRange(mockRanges);
 
-        assert.deepEqual(actual, expected);
+        expect(expected).to.deep.equal(actual);
     });
 
-    test('returns 0 when ranges are undefined', function (assert) {
-        var mockRanges = MockTimeRanges();
-        var expected = 0;
-        var actual = timeRangesUtil.endOfRange(mockRanges);
+    it('returns 0 when ranges are undefined', function() {
+        const mockRanges = MockTimeRanges();
+        const expected = 0;
+        const actual = endOfRange(mockRanges);
 
-        assert.deepEqual(actual, expected);
+        expect(expected).to.deep.equal(actual);
     });
 });

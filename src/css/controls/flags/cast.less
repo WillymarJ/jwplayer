@@ -1,7 +1,7 @@
-@import "../../shared-imports/vars";
+@import "../../shared-imports/vars.less";
 
 .jwplayer.jw-flag-casting {
-    .jw-cast {
+    &:not(.jw-flag-audio-player) .jw-cast {
         display: block;
     }
 
@@ -9,10 +9,10 @@
         display: none;
     }
 
-    .jw-icon-cc,
-    .jw-icon-audio-tracks,
     .jw-icon-hd,
-    .jw-icon-fullscreen {
+    .jw-captions,
+    .jw-icon-fullscreen,
+    .jw-icon-audio-tracks {
         display: none;
     }
 
@@ -25,15 +25,11 @@
             color: @active-color;
         }
     }
-
-    .jw-sharing-dock-btn {
-        display: none;
-    }
 }
 
-.jwplayer.jw-state-playing.jw-flag-casting,
-.jwplayer.jw-state-paused.jw-flag-casting {
-    .jw-display {
+.jw-state-playing,
+.jw-state-paused {
+    &.jw-flag-casting:not(.jw-flag-audio-player) .jw-display {
         display: table;
     }
 }

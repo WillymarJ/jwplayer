@@ -1,35 +1,31 @@
-define([
-    'utils/parser'
-], function (parser) {
-    /* jshint qunit: true */
+import * as parser from 'utils/parser';
 
-    QUnit.module('parser');
-    var test = QUnit.test.bind(QUnit);
+describe('parser', function() {
 
-    var testerGenerator = function (assert, method) {
+    const testerGenerator = function (method) {
         return function (left, right, message) {
-            assert.strictEqual(method.apply(this, left), right, message);
+            expect(method.apply(this, left), message).to.equal(right);
         };
     };
 
-    test('parser.getAbsolutePath', function(assert) {
-        var path = parser.getAbsolutePath(null, null);
-        assert.notOk(path, 'passing null as path returns null');
+    it('parser.getAbsolutePath', function() {
+        let path = parser.getAbsolutePath(null, null);
+        expect(path, 'passing null as path returns null').to.be.undefined;
 
         path = parser.getAbsolutePath('https://testingUrl', null);
-        assert.equal(path, 'https://testingUrl', 'passing absolute path returns the path');
+        expect(path, 'passing absolute path returns the path').to.equal('https://testingUrl');
 
         path = parser.getAbsolutePath('path', 'base');
-        assert.ok(path.indexOf('path') >= 0, 'passing path and base returns correct url with path');
-        assert.ok(path.indexOf('base') >= 0, 'passing path and base returns correct url with base');
+        expect(path.indexOf('path') >= 0, 'passing path and base returns correct url with path').to.be.true;
+        expect(path.indexOf('base') >= 0, 'passing path and base returns correct url with base').to.be.true;
 
-        var test = testerGenerator(assert, parser.getAbsolutePath);
-        test(['.',   'https://example.com/alpha/beta/filename'], 'https://example.com/alpha/beta');
-        test(['/',   'https://example.com/alpha/beta/filename'], 'https://example.com/');
+        const test = testerGenerator(parser.getAbsolutePath);
+        test(['.', 'https://example.com/alpha/beta/filename'], 'https://example.com/alpha/beta');
+        test(['/', 'https://example.com/alpha/beta/filename'], 'https://example.com/');
         test(['../', 'https://example.com/alpha/beta/filename'], 'https://example.com/alpha');
 
         test(['./hello/', 'https://example.com/'], 'https://example.com/hello', 'Testing with adding a directory');
-        test(['/',   'https://example.com/alpha/beta/filename?x=1&y=2'], 'https://example.com/',
+        test(['/', 'https://example.com/alpha/beta/filename?x=1&y=2'], 'https://example.com/',
             'Testing with GET arguments');
         test(['../../../../../', 'https://example.com/'], 'https://example.com/', 'Testing with extraneous ../');
 
@@ -37,11 +33,11 @@ define([
         test(['../hello.mp4', 'https://example.com/hi.html'], 'https://example.com/hello.mp4');
     });
 
-    test('parser.serialize', function (assert) {
-        var array = [];
-        var object = {};
+    it('parser.serialize', function() {
+        const array = [];
+        const object = {};
 
-        var test = testerGenerator(assert, parser.serialize);
+        const test = testerGenerator(parser.serialize);
         test([undefined], null, 'undefined returns null');
         test([null], null, 'null is passed through');
         test([array], array, 'arrays are passed through');
@@ -59,75 +55,66 @@ define([
         test(['100%'], '100%', 'percentage values are not changed');
     });
 
-    QUnit.skip('parser.getScriptPath', function(assert) {
-        var path = parser.getScriptPath(null);
-        assert.equal(path, '', 'returns an empty string when no file name is provided');
+    it('parser.parseXML', function() {
+        let xml = parser.parseXML('<input>');
+        expect(xml).to.equal(null);
 
-        var scriptPath = parser.getScriptPath('parser-test.js');
-        assert.ok(/\S+\:\/\/.+\/$/.test(scriptPath),
-            'returns a directory url ending with a forward slash "'+ scriptPath +'"');
-    });
-
-    test('parser.parseXML', function(assert) {
-        var xml = parser.parseXML('<input>');
-        assert.notOk(xml);
-        //
-        var input = '<input><test>ToTest</test></input>';
+        const input = '<input><test>ToTest</test></input>';
         xml = parser.parseXML(input);
-        assert.ok(xml, 'xml should be returned');
+        expect(!!xml, 'xml should be returned').to.be.true;
     });
 
-    test('parser.parseDimension', function(assert) {
-        var dimension = parser.parseDimension('');
-        assert.equal(dimension, 0, 'dimension with empty string should be 0');
+    it('parser.parseDimension', function() {
+        let dimension = parser.parseDimension('');
+        expect(dimension, 'dimension with empty string should be 0').to.equal(0);
 
         dimension = parser.parseDimension('35%');
-        assert.equal(dimension, '35%', 'dimension with percentage string should be the same');
+        expect(dimension, 'dimension with percentage string should be the same').to.equal('35%');
 
         dimension = parser.parseDimension('35px');
-        assert.equal(dimension, '35', 'dimension with px string should remove px');
+        expect(dimension, 'dimension with px string should remove px').to.equal(35);
 
         dimension = parser.parseDimension(35);
-        assert.equal(dimension, 35, 'dimension with int should be itself');
+        expect(dimension, 'dimension with int should be itself').to.equal(35);
     });
 
-    test('parser.timeFormat', function(assert) {
-        var time;
+    it('parser.timeFormat', function() {
+        let time;
 
         time = parser.timeFormat(3661);
-        assert.equal(time, '1:01:01', 'timeFormat with hours minutes seconds');
+        expect(time, 'timeFormat with hours minutes seconds').to.equal('1:01:01');
 
         time = parser.timeFormat(610);
-        assert.equal(time, '10:10', 'timeFormat with minutes seconds');
+        expect(time, 'timeFormat with minutes seconds').to.equal('10:10');
 
         time = parser.timeFormat('610');
-        assert.equal(time, '10:10', 'timeFormat with minutes seconds');
+        expect(time, 'timeFormat with minutes seconds').to.equal('10:10');
 
         time = parser.timeFormat(-1);
-        assert.equal(time, '00:00', 'timeFormat with negative number should be 00:00');
+        expect(time, 'timeFormat with negative number should be 00:00').to.equal('00:00');
 
         time = parser.timeFormat(-1, true);
-        assert.equal(time, '-00:01', 'timeFormat with negative numbers allowed should be -00:01');
+        expect(time, 'timeFormat with negative numbers allowed should be -00:01').to.equal('-00:01');
 
         time = parser.timeFormat(0);
-        assert.equal(time, '00:00', 'timeFormat with minutes seconds');
+        expect(time, 'timeFormat with minutes seconds').to.equal('00:00');
 
         time = parser.timeFormat();
-        assert.equal(time, '00:00', 'timeFormat with minutes seconds');
+        expect(time, 'timeFormat with minutes seconds').to.equal('00:00');
 
         time = parser.timeFormat(NaN);
-        assert.equal(time, '00:00', 'timeFormat with minutes seconds');
+        expect(time, 'timeFormat with minutes seconds').to.equal('00:00');
 
         time = parser.timeFormat(Infinity);
-        assert.equal(time, '00:00', 'timeFormat with minutes seconds');
+        expect(time, 'timeFormat with minutes seconds').to.equal('00:00');
 
         time = parser.timeFormat(null);
-        assert.equal(time, '00:00', 'timeFormat with minutes seconds');
+        expect(time, 'timeFormat with minutes seconds').to.equal('00:00');
 
         time = parser.timeFormat(false);
-        assert.equal(time, '00:00', 'timeFormat with minutes seconds');
+        expect(time, 'timeFormat with minutes seconds').to.equal('00:00');
 
         time = parser.timeFormat('test');
-        assert.equal(time, '00:00', 'timeFormat with minutes seconds');
+        expect(time, 'timeFormat with minutes seconds').to.equal('00:00');
     });
 });

@@ -1,34 +1,29 @@
-define([
-    'controller/storage',
-    'utils/simplemodel',
-    'test/underscore'
-], function(Storage, SimpleModel, _) {
-    /* jshint qunit: true */
+import Storage from 'model/storage';
+import SimpleModel from 'model/simplemodel';
+import _ from 'test/underscore';
 
+describe('Storage', function() {
 
-    QUnit.module('Storage');
+    it('provides persistent storage', function() {
+        const model = new SimpleModel();
+        const storage = new Storage('namespace', [
+            'volume',
+            'mute',
+        ]);
 
-    function mockModel() {
-        _.extend(this, SimpleModel);
-    }
-
-    QUnit.test('provides persistent storage', function(assert) {
-
-        var model = new mockModel();
-        var storage = new Storage();
         storage.track(model);
 
         model.set('volume', 70);
-        data = storage.getAllItems();
-        assert.strictEqual(data.volume, 70, 'storage listens for changes to model');
+        const data1 = storage.getAllItems();
+        expect(data1.volume, 'storage listens for changes to model').to.equal(70);
 
         storage.clear();
-        var data = storage.getAllItems();
-        assert.strictEqual(_.size(data), 0, 'storage is empty after calling clear');
+        const data2 = storage.getAllItems();
+        expect(_.size(data2), 'storage is empty after calling clear').to.equal(0);
 
         model.set('mute', true);
-        data = storage.getAllItems();
-        assert.strictEqual(_.size(data), 1, 'storage has one item after change to model');
-        assert.strictEqual(data.mute, true, 'boolean value stored properly');
+        const data3 = storage.getAllItems();
+        expect(_.size(data3), 'storage has one item after change to model').to.equal(1);
+        expect(data3.mute, 'boolean value stored properly').to.equal(true);
     });
 });

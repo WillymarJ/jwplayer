@@ -1,50 +1,52 @@
-define([
-    'utils/strings'
-], function(strings) {
+// Extract a plugin name from a string
+export const getPluginName = function(url) {
+    // Regex locates the characters after the last slash, until it encounters a dash.
+    return url.replace(/^(.*\/)?([^-]*)-?.*\.(js)$/, '$2');
+};
 
-    var utils = {};
+export function mapPluginToCode(pluginUrl) {
+    let code = 305000;
+    if (!pluginUrl) {
+        return code;
+    }
 
-    /**
-     * Types of plugin paths
-     */
-    var _pluginPathType = utils.pluginPathType = {
-        ABSOLUTE: 0,
-        RELATIVE: 1,
-        CDN: 2
-    };
+    switch (getPluginName(pluginUrl)) {
+        case 'jwpsrv':
+            code = 305001;
+            break;
+        case 'googima':
+            code = 305002;
+            break;
+        case 'vast':
+            code = 305003;
+            break;
+        case 'freewheel':
+            code = 305004;
+            break;
+        case 'dai':
+            code = 305005;
+            break;
+        case 'gapro':
+            code = 305006;
+            break;
+        default:
+            break;
+    }
 
-    utils.getPluginPathType = function (path) {
-        if (typeof path !== 'string') {
-            return;
-        }
-        path = path.split('?')[0];
-        var protocol = path.indexOf('://');
-        if (protocol > 0) {
-            return _pluginPathType.ABSOLUTE;
-        }
-        var folder = path.indexOf('/');
-        var extension = strings.extension(path);
-        if (protocol < 0 && folder < 0 && (!extension || !isNaN(extension))) {
-            return _pluginPathType.CDN;
-        }
-        return _pluginPathType.RELATIVE;
-    };
+    return code;
+}
 
+export function configurePlugin(pluginObj, pluginConfig, api) {
+    const pluginName = pluginObj.name;
 
-    /**
-     * Extracts a plugin name from a string
-     */
-    utils.getPluginName = function (pluginName) {
-        /** Regex locates the characters after the last slash, until it encounters a dash. **/
-        return pluginName.replace(/^(.*\/)?([^-]*)-?.*\.(swf|js)$/, '$2');
-    };
+    const div = document.createElement('div');
+    div.id = api.id + '_' + pluginName;
+    div.className = 'jw-plugin jw-reset';
 
-    /**
-     * Extracts a plugin version from a string
-     */
-    utils.getPluginVersion = function (pluginName) {
-        return pluginName.replace(/[^-]*-?([^\.]*).*$/, '$1');
-    };
+    const pluginOptions = Object.assign({}, pluginConfig);
+    const pluginInstance = pluginObj.getNewInstance(api, pluginOptions, div);
 
-    return utils;
-});
+    api.addPlugin(pluginName, pluginInstance);
+    return pluginInstance;
+}
+

@@ -1,12 +1,9 @@
-@import "../../shared-imports/vars";
-
 .jw-captions {
     position: absolute;
     width: 100%;
     height: 100%;
     text-align: center;
     display: none;
-    max-height: ~"calc(100% - 40px)";
     letter-spacing: normal;
     word-spacing: normal;
     text-transform: none;
@@ -60,12 +57,8 @@
     video {
         /* Normalize the coordinate system to uniformly adjust the container height when the control bar is visible */
         &::-webkit-media-controls {
+            display: none;
             justify-content: flex-start;
-        }
-
-        &::-webkit-media-text-track-container {
-            max-height: ~"calc(100% - 40px)";
-            line-height: normal;
         }
 
         /* Ensure captions aren't cropped when the pseudo element's width cannot accommodate all the text */
@@ -81,5 +74,14 @@
         &::-webkit-media-controls-panel-container {
             display: none;
         }
+    }
+}
+
+.jwplayer:not(.jw-state-playing),
+.jwplayer.jw-flag-media-audio.jw-state-playing,
+.jwplayer.jw-state-playing:not(.jw-flag-user-inactive):not(.jw-flag-controls-hidden) {
+    .jw-captions,
+    &:not(.jw-flag-ios-fullscreen) video::-webkit-media-text-track-container {
+        max-height: calc(100% - 60px);
     }
 }

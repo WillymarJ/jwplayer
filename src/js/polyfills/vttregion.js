@@ -14,18 +14,18 @@
  * limitations under the License.
  */
 
-(function(root) {
+(function() {
 
-    var scrollSetting = {
+    const scrollSetting = {
         '': true,
-        'up': true
+        up: true
     };
 
     function findScrollSetting(value) {
         if (typeof value !== 'string') {
             return false;
         }
-        var scroll = scrollSetting[value.toLowerCase()];
+        const scroll = scrollSetting[value.toLowerCase()];
         return scroll ? value.toLowerCase() : false;
     }
 
@@ -33,18 +33,18 @@
         return typeof value === 'number' && (value >= 0 && value <= 100);
     }
 
-  // VTTRegion shim http://dev.w3.org/html5/webvtt/#vttregion-interface
+    // VTTRegion shim http://dev.w3.org/html5/webvtt/#vttregion-interface
     function VTTRegion() {
-        var _width = 100;
-        var _lines = 3;
-        var _regionAnchorX = 0;
-        var _regionAnchorY = 100;
-        var _viewportAnchorX = 0;
-        var _viewportAnchorY = 100;
-        var _scroll = '';
+        let _width = 100;
+        let _lines = 3;
+        let _regionAnchorX = 0;
+        let _regionAnchorY = 100;
+        let _viewportAnchorX = 0;
+        let _viewportAnchorY = 100;
+        let _scroll = '';
 
         Object.defineProperties(this, {
-            'width': {
+            width: {
                 enumerable: true,
                 get: function() {
                     return _width;
@@ -56,7 +56,7 @@
                     _width = value;
                 }
             },
-            'lines': {
+            lines: {
                 enumerable: true,
                 get: function() {
                     return _lines;
@@ -68,7 +68,7 @@
                     _lines = value;
                 }
             },
-            'regionAnchorY': {
+            regionAnchorY: {
                 enumerable: true,
                 get: function() {
                     return _regionAnchorY;
@@ -80,19 +80,19 @@
                     _regionAnchorY = value;
                 }
             },
-            'regionAnchorX': {
+            regionAnchorX: {
                 enumerable: true,
                 get: function() {
                     return _regionAnchorX;
                 },
                 set: function(value) {
-                    if(!isValidPercentValue(value)) {
+                    if (!isValidPercentValue(value)) {
                         throw new Error('RegionAnchorY must be between 0 and 100.');
                     }
                     _regionAnchorX = value;
                 }
             },
-            'viewportAnchorY': {
+            viewportAnchorY: {
                 enumerable: true,
                 get: function() {
                     return _viewportAnchorY;
@@ -104,7 +104,7 @@
                     _viewportAnchorY = value;
                 }
             },
-            'viewportAnchorX': {
+            viewportAnchorX: {
                 enumerable: true,
                 get: function() {
                     return _viewportAnchorX;
@@ -116,14 +116,14 @@
                     _viewportAnchorX = value;
                 }
             },
-            'scroll': {
+            scroll: {
                 enumerable: true,
                 get: function() {
                     return _scroll;
                 },
                 set: function(value) {
-                    var setting = findScrollSetting(value);
-          // Have to check for false as an empty string is a legal value.
+                    const setting = findScrollSetting(value);
+                    // Have to check for false as an empty string is a legal value.
                     if (setting === false) {
                         throw new SyntaxError('An invalid or illegal string was specified.');
                     }
@@ -134,4 +134,4 @@
     }
 
     return VTTRegion;
-}(this));
+}());

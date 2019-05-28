@@ -1,128 +1,126 @@
-define([
-    'playlist/item',
-    'playlist/source',
-    'utils/underscore',
-    'providers/providers'
-], function(PlaylistItem, Source, _, Providers) {
+import { getPreload } from './preload';
+import PlaylistItem from 'playlist/item';
+import Source from 'playlist/source';
+import Providers from 'providers/providers';
+import { PlayerError, MSG_CANT_PLAY_VIDEO } from 'api/errors';
 
-    var Playlist = function (playlist) {
-        // Can be either an array of items or a single item.
-        playlist = (_.isArray(playlist) ? playlist : [playlist]);
+const Playlist = function(playlist) {
+    // Can be either an array of items or a single item.
+    return (Array.isArray(playlist) ? playlist : [playlist]).map(PlaylistItem);
+};
 
-        return _.compact(_.map(playlist, PlaylistItem));
-    };
+// Go through the playlist and choose a single playable type to play; remove sources of a different type
+export function filterPlaylist(playlist, model, feedData) {
+    const itemFeedData = Object.assign({}, feedData);
+    delete itemFeedData.playlist;
 
-    /** Go through the playlist and choose a single playable type to play; remove sources of a different type **/
-    Playlist.filterPlaylist = function(playlist, model, feedData) {
-        var list = [];
-        var providers = model.getProviders();
-        var preload = model.get('preload');
-        var itemFeedData = _.extend({}, feedData);
-        delete itemFeedData.playlist;
+    return playlist.map((item) => normalizePlaylistItem(model, item, feedData)).filter((item) => !!item);
 
-        _.each(playlist, function(item) {
-            item = _.extend({}, item);
+}
 
-            item.allSources = _formatSources(item, model);
 
-            item.sources = _filterSources(item.allSources, providers);
+export function validatePlaylist(playlist) {
+    if (!Array.isArray(playlist) || playlist.length === 0) {
+        throw new PlayerError(MSG_CANT_PLAY_VIDEO, 630);
+    }
+}
 
-            if (!item.sources.length) {
-                return;
-            }
+export function normalizePlaylistItem(model, item, feedData) {
+    const providers = model.getProviders();
+    const preload = model.get('preload');
+    const playlistItem = Object.assign({}, item);
 
-            // include selected file in item for backwards compatibility
-            item.file = item.sources[0].file;
+    playlistItem.preload = getPreload(item.preload, preload);
 
-            // set preload for the item, if it is defined
-            if (preload) {
-                item.preload = item.preload || preload;
-            }
+    playlistItem.allSources = formatSources(item, model);
 
-            if (feedData) {
-                item.feedData = itemFeedData;
-            }
+    playlistItem.sources = filterSources(playlistItem.allSources, providers);
 
-            list.push(item);
-        });
-
-        return list;
-    };
-
-    var _formatSources = function(item, model) {
-        var sources = item.sources;
-        var androidhls = model.get('androidhls');
-        var itemDrm = item.drm || model.get('drm');
-        var preload = item.preload || model.get('preload');
-        var withCredentials = _fallbackIfUndefined(item.withCredentials, model.get('withCredentials'));
-        var hlsjsdefault = model.get('hlsjsdefault');
-
-        return _.compact(_.map(sources, function(originalSource) {
-            if (!_.isObject(originalSource)) {
-                return null;
-            }
-            if (androidhls !== undefined && androidhls !== null) {
-                originalSource.androidhls = androidhls;
-            }
-
-            if (originalSource.drm || itemDrm) {
-                originalSource.drm = originalSource.drm || itemDrm;
-            }
-
-            if (originalSource.preload || preload) {
-                originalSource.preload = originalSource.preload || preload;
-            }
-
-            // withCredentials is assigned in ascending priority order, source > playlist > model
-            // a false value that is a higher priority than true must result in a false withCredentials value
-            // we don't want undefined if all levels have withCredentials as undefined
-            var cascadedWithCredentials = _fallbackIfUndefined(originalSource.withCredentials, withCredentials);
-            if (!_.isUndefined(cascadedWithCredentials)) {
-                originalSource.withCredentials = cascadedWithCredentials;
-            }
-
-            if (hlsjsdefault) {
-                originalSource.hlsjsdefault = hlsjsdefault;
-            }
-
-            return Source(originalSource);
-        }));
-    };
-
-    // A playlist item may have multiple different sources, but we want to stick with one.
-    var _filterSources = function(sources, providers) {
-        // legacy plugin support
-        if (!providers || !providers.choose) {
-            providers = new Providers({ primary: providers ? 'flash' : null });
-        }
-
-        var chosenProviderAndType = _chooseProviderAndType(sources, providers);
-        if (!chosenProviderAndType) {
-            return [];
-        }
-        var provider = chosenProviderAndType.provider;
-        var bestType = chosenProviderAndType.type;
-        return _.filter(sources, function(source) {
-            return source.type === bestType && providers.providerSupports(provider, source);
-        });
-    };
-
-    //  Choose from the sources a type which matches our most preferred provider
-    function _chooseProviderAndType(sources, providers) {
-        for (var i = 0; i < sources.length; i++) {
-            var source = sources[i];
-            var chosenProvider = providers.choose(source);
-            if (chosenProvider) {
-                return { type: source.type, provider: chosenProvider.providerToCheck };
-            }
-        }
-
-        return null;
+    if (!playlistItem.sources.length) {
+        return;
     }
 
-    function _fallbackIfUndefined(value, fallback) {
-        return _.isUndefined(value) ? fallback : value;
+    // include selected file in playlistItem for backwards compatibility
+    playlistItem.file = playlistItem.sources[0].file;
+    
+    playlistItem.feedData = feedData;
+
+    return playlistItem;
+}
+
+export const fixSources = (item, model) => filterSources(formatSources(item, model), model.getProviders());
+
+function formatSources(item, model) {
+    const { attributes } = model;
+    const { sources, allSources, preload, drm } = item;
+    const withCredentials = fallbackIfUndefined(item.withCredentials, attributes.withCredentials);
+
+    return (allSources || sources).map(function(originalSource) {
+        if (originalSource !== Object(originalSource)) {
+            return null;
+        }
+
+        copyAttribute(originalSource, attributes, 'androidhls');
+        copyAttribute(originalSource, attributes, 'hlsjsdefault');
+        copyAttribute(originalSource, attributes, 'safarihlsjs');
+
+        originalSource.preload = getPreload(originalSource.preload, preload);
+
+        const sourceDrm = originalSource.drm || drm || attributes.drm;
+        if (sourceDrm) {
+            originalSource.drm = sourceDrm;
+        }
+
+        // withCredentials is assigned in ascending priority order, source > playlist > model
+        // a false value that is a higher priority than true must result in a false withCredentials value
+        // we don't want undefined if all levels have withCredentials as undefined
+        const cascadedWithCredentials = fallbackIfUndefined(originalSource.withCredentials, withCredentials);
+        if (cascadedWithCredentials !== undefined) {
+            originalSource.withCredentials = cascadedWithCredentials;
+        }
+
+        return Source(originalSource);
+    }).filter(source => !!source);
+}
+
+// A playlist item may have multiple different sources, but we want to stick with one.
+function filterSources(sources, providers) {
+    if (!providers || !providers.choose) {
+        providers = new Providers();
     }
 
-    return Playlist;
-});
+    const chosenProviderAndType = chooseProviderAndType(sources, providers);
+    if (!chosenProviderAndType) {
+        return [];
+    }
+    const provider = chosenProviderAndType.provider;
+    const bestType = chosenProviderAndType.type;
+    return sources.filter(function(source) {
+        return source.type === bestType && providers.providerSupports(provider, source);
+    });
+}
+
+//  Choose from the sources a type which matches our most preferred provider
+function chooseProviderAndType(sources, providers) {
+    for (let i = 0; i < sources.length; i++) {
+        const source = sources[i];
+        const { providerToCheck } = providers.choose(source);
+        if (providerToCheck) {
+            return { type: source.type, provider: providerToCheck };
+        }
+    }
+
+    return null;
+}
+
+function fallbackIfUndefined(value, fallback) {
+    return (value === undefined) ? fallback : value;
+}
+
+function copyAttribute(source, attributes, name) {
+    if (name in attributes) {
+        source[name] = attributes[name];
+    }
+}
+
+export default Playlist;

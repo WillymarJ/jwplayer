@@ -1,199 +1,242 @@
-define([
-    'test/underscore',
-    'jquery',
-    'api/api',
-], function (_, $, Api) {
-    /* jshint qunit:true */
+import instances from 'api/players';
+import Api from 'api/api';
+import ApiSettings from 'api/api-settings';
+import sinon from 'sinon';
 
-    QUnit.module('Setup');
-    var test = QUnit.test.bind(QUnit);
-
-    test('fails when playlist is not an array', function(assert) {
-
-        var readyHandler = function() {
-            assert.ok(false, 'setup should not succeed');
-        };
-
-        var errorHandler = function(message) {
-            assert.ok(message, 'setup failed with message: ' + message);
-        };
-
-        var model = {};
-        testSetup(model, readyHandler, errorHandler, assert);
-
-        model = { playlist : '' };
-        testSetup(model, readyHandler, errorHandler, assert);
-
-        // model = { playlist : function() {} };
-        // testSetup(model, readyHandler, errorHandler, assert);
-
-        model = { playlist : 1 };
-        testSetup(model, readyHandler, errorHandler, assert);
-
-        model = { playlist : true };
-        testSetup(model, readyHandler, errorHandler, assert);
-    });
-
-    test('fails if playlist is empty', function(assert) {
-        var model = {
-            playlist: []
-        };
-
-        testSetup(model, function() {
-            assert.ok(false, 'setup should not succeed');
-        }, function(message) {
-            assert.ok(message, 'setup failed with message: ' + message);
-        }, assert);
-    });
-
-    test('fails when playlist items are filtered out', function(assert) {
-        var model = {
-            playlist: [{sources:[{file:'file.foo'}]}]
-        };
-
-        var playlist;
-        testSetup(model, function() {
-            // 'this' is the api instance
-            playlist = this.getPlaylist();
-            assert.deepEqual(playlist, [], 'playlist is an empty array');
-            assert.ok(false, 'setup should not succeed');
-        }, function(message) {
-            playlist = this.getPlaylist();
-            assert.deepEqual(playlist, [], 'playlist is an empty array');
-            assert.ok(message, 'setup failed with message: ' + message);
-        }, assert);
-    });
-
+describe('api.setup', function() {
     /*
-    test('fails after timeout', function(assert) {
-        var model = {
-            setupTimeout: 0.001,
-            playlist: [{sources:[{file:'file.mp4'}]}],
-            skin: '//ssl.p.jwpcdn.com/player/v/7.0.0/skins/bekle.css'
-        };
-
-        testSetup(model, function() {
-            assert.ok(false, 'setup should not succeed');
-        }, function(message) {
-            assert.ok(message, 'setup failed with message: ' + message);
-        }, assert);
-    });
-
-    test('fails - skin error', function(assert) {
-        var model = getModel({
-            playlist: [{sources:[{file:'file.mp4'}]}],
-            skin: '404.xml'
-        });
-
-        testSetup(model, function() {
-            assert.ok(false, 'setup should not succeed');
-        }, function(message) {
-            assert.ok(message, 'setup failed with message: ' + message);
-        }, assert);
-    });
-     */
-
-    test('succeeds when model.playlist.sources is valid', function(assert) {
-        var model = {
-            playlist: [{sources:[{file:'http://playertest.longtailvideo.com/mp4.mp4'}]}]
-        };
-
-        testSetup(model, function() {
-            assert.ok(true, 'setup ok');
-        }, function(message) {
-            assert.ok(false, 'setup failed with message: ' + message);
-        }, assert);
-    });
-
-    /*
-    test('can be cancelled', function(assert) {
-        var model = {
-            playlist: [{sources:[{file:'file.mp4'}]}]
-        };
-
-        var done = assert.async();
-
-        var setup = testSetup(model, function() {
-            assert.ok(false, 'setup should have been cancelled');
-        }, function(message) {
-            assert.ok(false, 'setup failed with message: ' + message);
-        }, assert);
-
-        // cancel setup
-        setup.destroy();
-
-        _.defer(function() {
-            assert.ok(true, 'so far so good');
-            done();
-        }, 0);
-    });
+     * This is an api.setup integration test.
+     * It verifies "setupError" and "ready" events for config.playlist values.
     */
 
-    test('modifies config', function(assert) {
-        var options = {
-            file: 'http://playertest.longtailvideo.com/mp4.mp4',
-            aspectratio: '4:3',
-            width: '100%'
-        };
-        var optionsOrig = _.extend({}, options);
+    this.timeout(6000);
 
-        var model = options;
+    const sandbox = sinon.createSandbox();
 
-        testSetup(model, function() {
-            assert.ok(true, 'setup ok');
-            assert.notEqual(options, optionsOrig, 'config was modified');
-        }, function(message) {
-            assert.ok(true, 'setup failed with message: ' + message);
-            assert.notEqual(options, optionsOrig, 'config was modified');
-        }, assert);
+    const errorMessage = 'This video file cannot be played.';
+
+    let api = null;
+
+    beforeEach(function () {
+        ApiSettings.debug = true;
+        // add fixture
+        const fixture = document.createElement('div');
+        const container = document.createElement('div');
+        fixture.id = 'test-fixture';
+        container.id = 'player';
+        fixture.appendChild(container);
+        document.body.appendChild(fixture);
+        sandbox.spy(console, 'error');
     });
 
-    function testSetup(model, success, error, assert) {
-        var done = assert.async();
-        var container = createContainer('player-' + Math.random().toFixed(12).substr(2));
-        var api = new Api(container, _.noop);
-        // console.log('test setup', api.id, JSON.stringify(model));
-        api.setup(model);
+    afterEach(function() {
+        ApiSettings.debug = false;
+        // remove fixture and player instances
+        const fixture = document.querySelector('#test-fixture');
+        if (api) {
+            api.remove();
+        }
+        if (fixture.parentNode) {
+            fixture.parentNode.removeChild(fixture);
+        }
+        for (let i = instances.length; i--;) {
+            instances[i].remove();
+        }
+        sandbox.restore();
+        api = null;
+    });
 
-        api.on('ready', function() {
-            // console.log('ready', api.id);
-            clearTimeout(timeout);
-            success.call(api);
-            try {
-                api.remove();
-            } catch (e) {
-                assert.notOk(e.toString());
-            }
-            done();
+    function expectReady(model) {
+        if (api) {
+            api.remove();
+        }
+        const container = document.querySelector('#player');
+        api = new Api(container);
+
+        return new Promise((resolve, reject) => {
+            api.setup(model);
+            api.on('ready', function(event) {
+                resolve({
+                    api,
+                    event
+                });
+            });
+            api.on('setupError', function(event) {
+                reject(new Error('Expected "ready" after setup. Got "setupError" with:' +
+                    JSON.stringify(event)));
+            });
         });
-        api.on('setupError', function(e) {
-            // console.log('setupError', api.id);
-            clearTimeout(timeout);
-            error.call(api, e.message);
-            try {
-                api.remove();
-            } catch (e) {
-                assert.notOk(e.toString());
-            }
-            done();
-        });
-        var timeout = setTimeout(function() {
-            // console.log('timeout', api.id);
-            assert.notOk('Setup timed out');
-            try {
-                api.remove();
-            } catch (e) {
-                assert.notOk(e.toString());
-            }
-            done();
-        }, 8000);
-        return api;
     }
 
-    function createContainer(id) {
-        var container = $('<div id="' + id + '"></div>')[0];
-        $('#qunit-fixture').append(container);
-        return container;
+    function expectSetupError(model) {
+        const container = document.querySelector('#player');
+        api = new Api(container);
+
+        return new Promise((resolve, reject) => {
+            api.setup(model);
+            api.on('ready', function() {
+                reject(new Error('Expected "setupError" after setup. Got "ready" instead.'));
+            });
+            api.on('setupError', function(event) {
+                resolve({
+                    api,
+                    event
+                });
+            });
+        });
     }
 
+    it('fails when playlist is undefined', function() {
+        return expectSetupError({
+            // playlist is undefined
+        }).then(({ event }) => {
+            expect(event.code).to.equal(102630);
+            expect(event.message).to.equal(errorMessage);
+        });
+    });
+
+    it('fails when playlist is an empty string', function () {
+        return expectSetupError({
+            playlist: ''
+        }).then(({ event }) => {
+            expect(event.code).to.equal(102630);
+            expect(event.message).to.equal(errorMessage);
+        });
+    });
+
+    it('fails when playlist is a number', function () {
+        return expectSetupError({
+            playlist: 1
+        }).then(({ event }) => {
+            expect(event.code).to.equal(102630);
+            expect(event.message).to.equal(errorMessage);
+        });
+    });
+
+    it('fails when playlist is a boolean', function () {
+        return expectSetupError({
+            playlist: true
+        }).then(({ event }) => {
+            expect(event.code).to.equal(102630);
+            expect(event.message).to.equal(errorMessage);
+        });
+    });
+
+    it('fails if playlist is empty', function () {
+        return expectSetupError({
+            playlist: []
+        }).then(({ event }) => {
+            expect(event.code).to.equal(102630);
+            expect(event.message).to.equal(errorMessage);
+        });
+    });
+
+    it('fails when playlist items are filtered out', function () {
+        return expectSetupError({
+            playlist: [{ sources: [{ file: 'file.foo' }] }]
+        }).then(function ({ event, api }) {
+            const playlist = api.getPlaylist();
+
+            expect(playlist).to.be.an('array').that.has.lengthOf(0);
+            expect(event.code).to.equal(102630);
+            expect(event.message).to.equal(errorMessage);
+        });
+    });
+
+    it('succeeds when model.playlist.sources is valid', function () {
+        return expectReady({
+            preload: 'none',
+            playlist: [{
+                sources: [
+                    { file: 'http://playertest.longtailvideo.com/mp4.mp4' }
+                ]
+            }]
+        }).then(({ event, api }) => {
+            const playlist = api.getPlaylist();
+
+            expect(playlist).to.be.an('array').that.has.lengthOf(1);
+            expect(event.type).to.equal('ready');
+        });
+    });
+
+    it('succeeds with model.playlist.allSources when one source is valid', function () {
+        return expectReady({
+            preload: 'none',
+            playlist: [{
+                sources: [
+                    { file: 'foobar' }
+                ]
+            }, {
+                sources: [
+                    { file: 'http://playertest.longtailvideo.com/mp4.webm' },
+                    { file: 'http://playertest.longtailvideo.com/mp4.mp4' }
+                ]
+            }]
+        }).then(({ event, api }) => {
+            const playlist = api.getPlaylist();
+
+            expect(playlist).to.be.an('array').that.has.lengthOf(1);
+            expect(playlist[0], 'sources').to.have.property('sources').that.is.an('array').that.has.lengthOf(1);
+            expect(playlist[0], 'allSources').to.have.property('allSources').that.is.an('array').that.has.lengthOf(2);
+            expect(event.type).to.equal('ready');
+        });
+    });
+
+    it('triggers "remove" if the api has been previously setup', function() {
+        const removeSpy1 = sinon.spy();
+        const removeSpy2 = sinon.spy();
+
+        const container = document.querySelector('#player');
+        api = new Api(container);
+
+        return new Promise((resolve, reject) => {
+            api.setup({
+                events: {
+                    remove: removeSpy1
+                },
+                preload: 'none',
+                file: 'http://playertest.longtailvideo.com/mp4.mp4'
+            }).on('ready', function(event) {
+                resolve({ api, event });
+            }).on('setupError', function(event) {
+                reject(new Error('Expected "ready" after setup. Got "setupError" with:' +
+                    JSON.stringify(event)));
+            });
+        }).then(() => {
+            expect(removeSpy1, 'first setup').to.have.callCount(0);
+
+            return new Promise((resolve, reject) => {
+                api.setup({
+                    events: {
+                        remove: removeSpy2
+                    },
+                    preload: 'none',
+                    file: 'http://playertest.longtailvideo.com/mp4.mp4'
+                }).on('ready', function(event) {
+                    resolve({ api, event });
+                }).on('setupError', function(event) {
+                    reject(new Error('Expected "ready" after setup. Got "setupError" with:' +
+                        JSON.stringify(event)));
+                });
+            });
+        }).then(() => {
+            expect(removeSpy1, 'second setup: first listener').to.have.callCount(1);
+            expect(removeSpy2, 'second setup: second listener').to.have.callCount(0);
+        });
+    });
+
+    describe('contextual setup error', function () {
+        it('removes and hides when encountering a setupError in contextual mode', function () {
+            const removeSpy = sinon.spy();
+            return expectSetupError({
+                playlist: [],
+                contextual: true,
+                events: {
+                    remove: removeSpy
+                }
+            }).then(() => {
+                expect(removeSpy).to.have.callCount(1);
+            });
+        });
+    });
 });

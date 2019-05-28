@@ -1,40 +1,37 @@
-define([
-    'controller/tracks-helper',
-    'utils/underscore'
-], function (tracksHelper, _) {
-    var test = QUnit.test.bind(QUnit);
+import { createId, createLabel } from 'controller/tracks-helper';
+import _ from 'utils/underscore';
 
-    var tracks,
-        itemTrack,
-        prop,
-        func,
-        count;
+let tracks;
+let itemTrack;
+let prop;
+let func;
+let count;
 
-    var setCount = function() {
-        count = tracks.length;
-    };
+const setCount = function() {
+    count = tracks.length;
+};
 
-    var assertProperty = function(assert, propToDelete, expected, msg) {
-        if(propToDelete) {
-            delete itemTrack[propToDelete];
-        }
-        var track = _.extend({}, itemTrack);
-        var val = tracksHelper[func](track, count);
-        track[prop] = val[prop] || val;
-        tracks.push(track);
-        assert.equal(track[prop], expected, msg);
-    };
+const assertProperty = function (propToDelete, expected, msg) {
+    if (propToDelete) {
+        delete itemTrack[propToDelete];
+    }
+    const track = Object.assign({}, itemTrack);
+    const val = func(track, count);
+    track[prop] = val[prop] || val;
+    tracks.push(track);
+    expect(track[prop], msg).to.equal(expected);
+};
 
-    // Tests for Creating track._id
+// Tests for Creating track._id
 
-    QUnit.module('tracksHelper.createId');
+describe('tracksHelper.createId', function() {
 
-    test('Create track._id from track properties', function (assert) {
+    it('Create track._id from track properties', function() {
         tracks = [];
         itemTrack = {
             _id: '_id',
             defaulttrack: true,
-            default: true,
+            'default': true,
             file: 'file',
             kind: 'kind',
             label: 'label',
@@ -42,33 +39,34 @@ define([
             language: 'language'
         };
         prop = '_id';
-        func = 'createId';
+        func = createId;
         count = 0;
 
-        assert.expect(6);
 
-        assertProperty(assert, '', 'default', 'track.default is 1st priority even if other properties are set');
-        assertProperty(assert, 'default', 'default',
+        assertProperty('', 'default', 'track.default is 1st priority even if other properties are set');
+        assertProperty('default', 'default',
             'track.defaulttrack is 2nd priority even if other properties are set');
-        assertProperty(assert, 'defaulttrack', '_id', 'track._id is used if track.default is undefined');
-        assertProperty(assert, '_id', 'file', 'track.file is used if track.default or track._id is undefined');
+        assertProperty('defaulttrack', '_id', 'track._id is used if track.default is undefined');
+        assertProperty('_id', 'file', 'track.file is used if track.default or track._id is undefined');
         setCount();
-        assertProperty(assert, 'file',  'kind' + count,
+        assertProperty('file', 'kind' + count,
             'track.kind is used if other properties are undefined.');
         setCount();
-        assertProperty(assert, 'kind', 'cc' + count, 'cc is used as the prefix if no other properties are set');
+        assertProperty('kind', 'cc' + count, 'cc is used as the prefix if no other properties are set');
     });
+});
 
-    // Tests for creating track.label
 
-    QUnit.module('tracksHelper.createLabel');
+// Tests for creating track.label
 
-    test('Create track label from track properties', function (assert) {
+describe('tracksHelper.createLabel', function() {
+
+    it('Create track label from track properties', function() {
         tracks = [];
         itemTrack = {
             _id: '_id',
             defaulttrack: true,
-            default: true,
+            'default': true,
             file: 'file',
             kind: 'kind',
             label: 'label',
@@ -76,17 +74,16 @@ define([
             language: 'language'
         };
         prop = 'label';
-        func = 'createLabel';
+        func = createLabel;
         count = 0;
 
-        assert.expect(5);
 
-        assertProperty(assert, '', 'label', 'track.label is 1st priority');
-        assertProperty(assert, 'label', 'name', 'track.name is 2nd priority');
-        assertProperty(assert, 'name', 'language', 'track.language is 3rd priority');
-        assertProperty(assert, 'language', 'Unknown CC', 'Unknown CC is used when there is no label, name or language');
+        assertProperty('', 'label', 'track.label is 1st priority');
+        assertProperty('label', 'name', 'track.name is 2nd priority');
+        assertProperty('name', 'language', 'track.language is 3rd priority');
+        assertProperty('language', 'Unknown CC', 'Unknown CC is used when there is no label, name or language');
         setCount();
-        assertProperty(assert, '', 'Unknown CC [5]',
+        assertProperty('', 'Unknown CC [5]',
             'Unknown CC [unknownTrackCount] used when there is no label, name or language and multiple tracks');
     });
 });

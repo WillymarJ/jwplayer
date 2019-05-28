@@ -1,11 +1,11 @@
 /* jshint maxlen: 1000 */
-define({
-    tagged : {
-        file : 'sample',
-        type : 'mp4'
+export default {
+    tagged: {
+        file: 'sample',
+        type: 'mp4'
     },
-    invalid : {
-        file : undefined
+    invalid: {
+        file: undefined
     },
     starscape: {
         file: 'http://playertest.longtailvideo.com/starscape.mp4',
@@ -31,4 +31,4 @@ define({
         title: 'Sintel Trailer',
         description: 'Sintel is a fantasy computer generated short movie. It\'s the third release from the Blender Open Movie Project.'
     }
-});
+};

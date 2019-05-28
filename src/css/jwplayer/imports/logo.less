@@ -1,8 +1,8 @@
-@import "../../shared-imports/vars";
+@import "../../shared-imports/vars.less";
 
 .jw-logo {
     position: absolute;
-    margin: @ui-margin/2;
+    margin: @ui-margin;
     cursor: pointer;
     pointer-events: all;
 
@@ -13,6 +13,12 @@
     right: auto;
     left: auto;
     bottom: auto;
+
+    outline: none;
+
+    &.jw-tab-focus:focus {
+        outline: @ui-focus;
+    }
 }
 
 .jw-flag-audio-player .jw-logo {
@@ -22,10 +28,6 @@
 .jw-logo-top-right {
     top: 0;
     right: 0;
-
-    &.jw-below {
-        top: 3.5em;
-    }
 }
 
 .jw-logo-top-left {
@@ -34,11 +36,19 @@
 }
 
 .jw-logo-bottom-left {
-    bottom: 0;
     left: 0;
 }
 
 .jw-logo-bottom-right {
-    bottom: 0;
     right: 0;
+}
+
+.jw-logo-bottom-left,
+.jw-logo-bottom-right {
+    bottom: @mobile-touch-target;
+    transition: bottom 150ms @default-timing-function;
+}
+
+.jw-state-idle .jw-logo {
+    z-index: 1;
 }

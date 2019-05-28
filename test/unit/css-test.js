@@ -1,123 +1,114 @@
-define([
-    'utils/css'
-], function (css) {
-    /* jshint qunit: true */
+import { css, clearCss, style, transform, getRgba } from 'utils/css';
 
-    QUnit.module('css');
-    var test = QUnit.test.bind(QUnit);
+describe('css', function() {
 
-    test('css.css and css.clearCss', function(assert) {
-        var playerId = 'css-testplayer';
-        var count = document.getElementsByTagName('style').length;
+    it('css() and clearCss()', function() {
+        const playerId = 'css-testplayer';
+        const count = document.getElementsByTagName('style').length;
 
-        var testSelector = 'test-selector';
-        var stylesBlue = {
+        const testSelector = 'test-selector';
+        const stylesBlue = {
             'background-color': 'blue'
         };
 
-        var stylesRed = {
+        const stylesRed = {
             backgroundColor: 'red'
         };
 
-        css.css(testSelector, stylesBlue, playerId);
+        css(testSelector, stylesBlue, playerId);
 
-        // check that css.css accepts a style object and that a new style sheet has been added since
-        // this is the first time calling css.css.
-        var newCount = document.getElementsByTagName('style').length;
-        assert.equal(newCount, count+1, 'css adds a new style sheet');
+        // check that css() accepts a style object and that a new style sheet has been added since
+        // this is the first time calling css().
+        const newCount = document.getElementsByTagName('style').length;
+        expect(newCount, 'css adds a new style sheet').to.equal(count + 1);
 
         // check that style sheet is correctly included to the end of head
-        var styleSheet = document.getElementsByTagName('head')[0].lastChild;
-        assert.ok(/test-selector{background-color: ?blue;?}/.test(styleSheet.innerHTML),
-            'css object correctly included');
+        const styleSheet = document.getElementsByTagName('head')[0].lastChild;
+        expect(/test-selector{background-color: ?blue;?}/.test(styleSheet.innerHTML), 'css object correctly included').to.be.true;
 
-        // check that css.css accepts a style object and css will be replaced
-        css.css(testSelector, stylesRed, playerId);
-        assert.ok(!/test-selector{background-color: ?blue;?}/.test(styleSheet.innerHTML),
-            'css object correctly replaced');
-        assert.ok(/test-selector{background-color: ?red;?}/.test(styleSheet.innerHTML),
-            'css object correctly replaced');
+        // check that css() accepts a style object and css will be replaced
+        css(testSelector, stylesRed, playerId);
+        expect(!/test-selector{background-color: ?blue;?}/.test(styleSheet.innerHTML), 'css object correctly replaced').to.be.true;
+        expect(/test-selector{background-color: ?red;?}/.test(styleSheet.innerHTML), 'css object correctly replaced').to.be.true;
 
-        css.clearCss(playerId);
+        clearCss(playerId);
 
-        // check clearCss works correctly
-        assert.ok(!/test-selector{background-color: ?red;?}/.test(styleSheet.innerHTML), 'css correctly removed');
+        // check clearCss() works correctly
+        expect(!/test-selector{background-color: ?red;?}/.test(styleSheet.innerHTML), 'css correctly removed').to.be.true;
 
-        // check that css.css accepts css style as a string
-        css.css(testSelector, '{test-selector{background-color: blue}', playerId);
-        assert.ok(/test-selector{background-color: ?blue;?}/.test(styleSheet.innerHTML),
-            'css text correctly inserted');
+        // check that css() accepts css style as a string
+        css(testSelector, '{test-selector{background-color: blue}', playerId);
+        expect(/test-selector{background-color: ?blue;?}/.test(styleSheet.innerHTML), 'css text correctly inserted').to.be.true;
     });
 
-    test('css.style', function(assert) {
-        var element = document.createElement('div');
-        var element2 = document.createElement('div');
+    it('style', function() {
+        const element = document.createElement('div');
+        const element2 = document.createElement('div');
 
-        var styles = {
+        const styles = {
             'background-color': 'white',
             'z-index': 10,
             'background-image': 'images/image.jpg',
-            'color': '123456'
+            color: '123456'
         };
 
-        var styles2 = {
-            'backgroundColor': 'white',
-            'backgroundImage': 'images/image.jpg'
+        const styles2 = {
+            backgroundColor: 'white',
+            backgroundImage: 'images/image.jpg'
         };
 
         // this should not break
-        css.style(null, styles);
-        css.style(element, null);
+        style(null, styles);
+        style(element, null);
 
-        css.style(element, styles);
-        assert.ok(element.getAttribute('style').indexOf('background-color: white') >= 0, 'css style background');
-        assert.ok(element.getAttribute('style').indexOf('z-index: 10') >= 0, 'css style z index');
-        assert.ok(element.getAttribute('style').indexOf('background-image: url(') >= 0, 'css style img');
-        assert.ok(element.getAttribute('style').indexOf('color: rgb(18, 52, 86)') >= 0, 'css style color');
+        style(element, styles);
+        expect(element.getAttribute('style').indexOf('background-color: white') >= 0, 'css style background').to.be.true;
+        expect(element.getAttribute('style').indexOf('z-index: 10') >= 0, 'css style z index').to.be.true;
+        expect(element.getAttribute('style').indexOf('background-image: url(') >= 0, 'css style img').to.be.true;
+        expect(element.getAttribute('style').indexOf('color: rgb(18, 52, 86)') >= 0, 'css style color').to.be.true;
 
         // test camelCases
-        css.style(element2, styles2);
-        assert.ok(element2.getAttribute('style').indexOf('background-color: white') >= 0, 'camelCase style background');
-        assert.ok(element2.getAttribute('style').indexOf('background-image: url(') >= 0, 'camelCase style img');
+        style(element2, styles2);
+        expect(element2.getAttribute('style').indexOf('background-color: white') >= 0, 'camelCase style background').to.be.true;
+        expect(element2.getAttribute('style').indexOf('background-image: url(') >= 0, 'camelCase style img').to.be.true;
     });
 
-    test('css.transform', function(assert) {
-        var element = document.createElement('div');
+    it('transform', function() {
+        const element = document.createElement('div');
 
         // this should not break
-        css.transform(null, 'none');
-        css.transform(element, null);
+        transform(null, 'none');
+        transform(element, null);
 
-        css.transform(element, 'none');
+        transform(element, 'none');
 
-        assert.equal(element.style.transform, 'none', 'css transform');
-        assert.equal(element.style.msTransform, 'none', 'css transform ms');
-        assert.equal(element.style.mozTransform, 'none', 'css transform moz');
-        assert.equal(element.style.oTransform, 'none', 'css transform o');
+        expect(element.style.transform, 'css transform').to.equal('none');
+        expect(element.style.msTransform, 'css transform ms').to.equal('none');
+        expect(element.style.mozTransform, 'css transform moz').to.equal('none');
+        expect(element.style.oTransform, 'css transform o').to.equal('none');
 
-        css.transform(element, '');
+        transform(element, '');
 
-        assert.equal(element.style.transform, '', 'css transform');
-        assert.equal(element.style.msTransform, '', 'css transform ms');
-        assert.equal(element.style.mozTransform, '', 'css transform moz');
-        assert.equal(element.style.oTransform, '', 'css transform o');
+        expect(element.style.transform, 'css transform').to.equal('');
+        expect(element.style.msTransform, 'css transform ms').to.equal('');
+        expect(element.style.mozTransform, 'css transform moz').to.equal('');
+        expect(element.style.oTransform, 'css transform o').to.equal('');
     });
 
-    test('css.hexToRgba', function(assert) {
+    it('getRgba', function() {
         // this should not break
-        css.hexToRgba(null, null);
+        getRgba(null, null);
 
-        var rgba = css.hexToRgba('123456', 0.5);
-        assert.equal(rgba, 'rgba(18, 52, 86, 0.005)', 'css hexToRgba test');
+        let rgba = getRgba('123456', 0.5);
+        expect(rgba, 'css getRgba test').to.equal('rgba(18, 52, 86, 0.005)');
 
-        rgba = css.hexToRgba('123', 0);
-        assert.equal(rgba, 'rgba(17, 34, 51, 0)', 'css hexToRgba test with length 3');
+        rgba = getRgba('123', 0);
+        expect(rgba, 'css getRgba test with length 3').to.equal('rgba(17, 34, 51, 0)');
 
-        rgba = css.hexToRgba('', 0);
-        assert.equal(rgba, 'rgba(0, 0, 0, 0)', 'css hexToRgba test with invalid value');
+        rgba = getRgba('', 0);
+        expect(rgba, 'css getRgba test with invalid value').to.equal('rgba(0, 0, 0, 0)');
 
-        rgba = css.hexToRgba('red');
-        assert.equal(rgba, 'rgb(255, 0, 0)', 'css hexToRgba test with color value and no alpha');
+        rgba = getRgba('red');
+        expect(rgba, 'css getRgba test with color value and no alpha').to.equal('rgb(255, 0, 0)');
     });
-
 });

@@ -1,60 +1,53 @@
-define([
-    'test/underscore',
-    'playlist/item'
-], function (_, item) {
-    /* jshint qunit: true */
+import item from 'playlist/item';
+import _ from 'test/underscore';
 
-    QUnit.module('playlist item');
-    var test = QUnit.test.bind(QUnit);
+describe('playlist item', function() {
 
-    // http://support.jwplayer.com/customer/portal/articles/1413113-configuration-options-reference
-    function testItem(assert, config) {
-        var x = item(config);
+    function testItem(config) {
+        const x = item(config);
 
-        assert.ok(_.isObject(x), 'Item generated from ' + config + ' input');
-        assert.ok(_.isArray(x.sources), 'Item has sources array');
-        assert.ok(_.isArray(x.tracks), 'Item has tracks array');
+        expect(_.isObject(x), 'Item generated from ' + config + ' input').to.be.true;
+        expect(_.isArray(x.sources), 'Item has sources array').to.be.true;
+        expect(_.isArray(x.tracks), 'Item has tracks array').to.be.true;
         return x;
     }
 
     // Check for the attrs which testItem does not
-    function testItemComplete(assert, config) {
-        var item = testItem(assert, config);
+    function testItemComplete(config) {
+        const playlistItem = testItem(config);
 
-        var attrs = ['image', 'description', 'mediaid', 'title', 'minDvrWindow'];
-        _.each(attrs, function(a) {
-            assert.ok(_.has(item, a), 'Item has ' + a + ' attribute');
+        const attrs = ['image', 'description', 'mediaid', 'title', 'minDvrWindow'];
+        _.each(attrs, function (a) {
+            expect(_.has(playlistItem, a), 'Item has ' + a + ' attribute').to.be.true;
         });
 
-        return item;
+        return playlistItem;
     }
 
-    test('worst case input arguments are handled', function(assert) {
-
-        testItem(assert);
-        testItem(assert, undefined);
-        testItem(assert, {});
-        testItem(assert, true);
-        testItem(assert, false);
-        testItem(assert, {title : 'hi', sources: false});
-        testItem(assert, {title : 'hi', sources: {}});
-        testItem(assert, {tracks: [{}, null]});
-        testItem(assert, {tracks: 1});
+    it('worst case input arguments are handled', function() {
+        testItem();
+        testItem(undefined);
+        testItem({});
+        testItem(true);
+        testItem(false);
+        testItem({ title: 'hi', sources: false });
+        testItem({ title: 'hi', sources: {} });
+        testItem({ tracks: [{}, null] });
+        testItem({ tracks: 1 });
     });
 
-    test('input with multiple sources, a default and captions track', function(assert) {
-        var x = testItemComplete(assert, {
+    it('input with multiple sources, a default and captions track', function() {
+        const x = testItemComplete({
             image: 'image.png',
             description: 'desc',
             sources: [
                 {
                     file: 'f1.mp4',
                     label: 'f1 label'
-                    //'default' : true,
                 },
                 {
                     file: 'rtmp://f2',
-                    'default' : true
+                    'default': true
                 },
                 {
                     file: 'https://www.youtube.com/watch?v=zKtAuflyc5w'
@@ -68,32 +61,30 @@ define([
             tracks: [
                 {
                     file: 'fake.vtt',
-                    //kind: 'captions',
                     label: 'track label'
-                    //'default': true
                 }
             ]
         });
 
         // Test Sources
-        assert.equal(x.sources[0].file, 'f1.mp4', 'First source file is correct');
-        assert.equal(x.sources[1].file, 'rtmp://f2', 'Second source file is correct');
-        assert.equal(x.sources[2].file, 'https://www.youtube.com/watch?v=zKtAuflyc5w', 'Third source file is correct');
-        assert.equal(x.sources.length, 3, 'Sources whose types cannot be determined are removed');
-        assert.ok(!x.sources[0]['default'], 'First source was not set to default');
-        assert.equal(x.sources[1]['default'], true, 'Second source was set to default');
-        assert.equal(x.sources[0].label, 'f1 label', 'First source label matches input.source[0].label');
-        assert.equal(x.sources[1].label, '1', 'Second source label is assigned 1');
+        expect(x.sources[0].file, 'First source file is correct').to.equal('f1.mp4');
+        expect(x.sources[1].file, 'Second source file is correct').to.equal('rtmp://f2');
+        expect(x.sources[2].file, 'Third source file is correct').to.equal('https://www.youtube.com/watch?v=zKtAuflyc5w');
+        expect(x.sources.length, 'Sources whose types cannot be determined are removed').to.equal(3);
+        expect(!x.sources[0].default, 'First source was not set to default').to.be.true;
+        expect(x.sources[1].default, 'Second source was set to default').to.equal(true);
+        expect(x.sources[0].label, 'First source label matches input.source[0].label').to.equal('f1 label');
+        expect(x.sources[1].label, 'Second source label is assigned 1').to.equal('1');
 
         // Test tracks
-        assert.equal(x.tracks[0].file, 'fake.vtt', 'First track file matches input.tracks[0].file');
-        assert.equal(x.tracks[0].kind, 'captions', 'First track kind defaults to captions');
-        assert.equal(x.tracks[0].label, 'track label', 'First track label matches input.tracks[0].label');
+        expect(x.tracks[0].file, 'First track file matches input.tracks[0].file').to.equal('fake.vtt');
+        expect(x.tracks[0].kind, 'First track kind defaults to captions').to.equal('captions');
+        expect(x.tracks[0].label, 'First track label matches input.tracks[0].label').to.equal('track label');
 
     });
 
-    test('input source type normalization', function(assert) {
-        var x = testItem(assert, {
+    it('input source type normalization', function() {
+        const x = testItem({
             sources: [
                 {
                     file: 'f1.mp4'
@@ -121,31 +112,31 @@ define([
         });
 
         // Test Source types
-        assert.equal(x.sources[0].type, 'mp4', 'First source mp4 type read from file extension');
-        assert.equal(x.sources[1].type, 'rtmp', 'Second source rtmp type read from file protocol');
-        assert.equal(x.sources[2].type, 'youtube', 'Third source youtube type parsed from url');
-        assert.equal(x.sources[3].type, 'mp4', 'Fourth source mp4 type split from MIME type video/mp4');
-        assert.equal(x.sources[4].type, 'hls', 'm3u8 type normailzed to hls');
-        assert.equal(x.sources[5].type, 'rtmp', 'smil type normailzed to rtmp');
-        assert.equal(x.sources[6].type, 'aac', 'm4a type normailzed to aac');
+        expect(x.sources[0].type, 'First source mp4 type read from file extension').to.equal('mp4');
+        expect(x.sources[1].type, 'Second source rtmp type read from file protocol').to.equal('rtmp');
+        expect(x.sources[2].type, 'Third source youtube type parsed from url').to.equal('youtube');
+        expect(x.sources[3].type, 'Fourth source mp4 type split from MIME type video/mp4').to.equal('mp4');
+        expect(x.sources[4].type, 'm3u8 type normailzed to hls').to.equal('hls');
+        expect(x.sources[5].type, 'smil type normailzed to rtmp').to.equal('rtmp');
+        expect(x.sources[6].type, 'm4a type normailzed to aac').to.equal('aac');
 
     });
 
-    test('input.levels are converted to sources', function(assert) {
-        var x = testItem(assert, {
+    it('input.levels are converted to sources', function() {
+        const x = testItem({
             levels: [{
                 file: 'f1.mp4',
-                label : 'f1 label',
-                //'default' : true,
-                type : 'mp4'
+                label: 'f1 label',
+                // 'default' : true,
+                type: 'mp4'
             }]
         });
 
-        assert.equal(x.sources[0].file, 'f1.mp4', 'first source file matches input.levels[0].file');
+        expect(x.sources[0].file, 'first source file matches input.levels[0].file').to.equal('f1.mp4');
     });
 
-    test('input.captions are converted to tracks', function(assert) {
-        var x = testItem(assert, {
+    it('input.captions are converted to tracks', function() {
+        const x = testItem({
             file: 'x',
             captions: [
                 {
@@ -155,34 +146,34 @@ define([
             ]
         });
 
-        assert.equal(x.tracks[0].file, 'fake.vtt', 'First track file matches input.captions[0].file');
+        expect(x.tracks[0].file, 'First track file matches input.captions[0].file').to.equal('fake.vtt');
     });
 
-    test('property passthrough of unknown values', function(assert) {
-        var x = testItem(assert, {
+    it('property passthrough of unknown values', function() {
+        const x = testItem({
             file: 'x',
-            randomStr : 'rrr',
+            randomStr: 'rrr',
             adSchedule: {
                 adbreak: {
-                    tag : 'hi'
+                    tag: 'hi'
                 }
             }
         });
 
         // This is important for passing adschedule data through
-        assert.equal(x.randomStr, 'rrr', 'Passes through unknown values');
+        expect(x.randomStr, 'Passes through unknown values').to.equal('rrr');
     });
 
-    test('input.sources may contain one source object instead of array', function(assert) {
-        var x = testItem(assert, {
+    it('input.sources may contain one source object instead of array', function() {
+        const x = testItem({
             sources: {
                 file: 'f1.mp4',
-                label : 'f1 label',
-                //'default' : true,
-                type : 'mp4'
+                label: 'f1 label',
+                // 'default' : true,
+                type: 'mp4'
             }
         });
 
-        assert.equal(x.sources[0].file, 'f1.mp4', 'First source file matches input.sources.file');
+        expect(x.sources[0].file, 'First source file matches input.sources.file').to.equal('f1.mp4');
     });
 });

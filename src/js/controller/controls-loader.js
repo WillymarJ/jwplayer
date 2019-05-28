@@ -1,23 +1,19 @@
-define([
+import { chunkLoadWarningHandler } from '../api/core-loader';
 
-], function() {
-    var controls = null;
+let controlsPromise = null;
 
-    function load() {
-        if (controls) {
-            return Promise.resolve(controls);
-        }
+export const ControlsLoader = {};
 
-        return new Promise(function (resolve) {
-            require.ensure(['view/controls/controls'], function (require) {
-                controls = require('view/controls/controls');
-                resolve(controls);
-            }, 'jwplayer.controls');
-        });
+export function loadControls() {
+    if (!controlsPromise) {
+        controlsPromise = require.ensure(['view/controls/controls'], function (require) {
+            const ControlsModule = require('view/controls/controls').default;
+            ControlsLoader.controls = ControlsModule;
+            return ControlsModule;
+        }, function() {
+            controlsPromise = null;
+            chunkLoadWarningHandler(301130)();
+        }, 'jwplayer.controls');
     }
-
-    return {
-        load: load
-    };
-});
-
+    return controlsPromise;
+}

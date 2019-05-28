@@ -1,42 +1,46 @@
-define([
-    'utils/timer'
-], function (timer) {
-    /* jshint qunit: true */
+import Timer from 'api/timer';
+import { dateTime } from 'utils/clock';
+import { now } from 'utils/date';
 
-    QUnit.module('timer');
-    var test = QUnit.test.bind(QUnit);
+describe('clock', function() {
+    it('provides date time equal or close to Date.now()', function() {
+        const clockTime = dateTime();
+        const dateGetTime = now();
+        // With rounding differences between Date.now() and performance.now(),
+        // and JavaScipt execution, only allow a few milliseconds difference
+        expect(Math.abs(clockTime - dateGetTime)).to.be.below(5);
+    });
+});
 
-    test('timer start/end test', function(assert) {
-        var time = new timer();
+describe('timer', function() {
+
+    it('timer start/end test', function() {
+        const time = new Timer();
         time.start('test');
         time.end('test');
 
-        var dump = time.dump();
-        assert.equal(dump.counts.test, 1, 'test has been called once');
-        assert.equal(typeof dump.sums.test, 'number', 'sum is a number');
+        const dump = time.dump();
+        expect(dump.counts.test, 'test has been called once').to.equal(1);
+        expect(typeof dump.sums.test, 'sum is a number').to.equal('number');
 
-        var invalidEnd = time.end('notStarted');
-        assert.notOk(invalidEnd, 'function that has not yet started should have no end time');
+        const invalidEnd = time.end('notStarted');
+        expect(invalidEnd, 'function that has not yet started should have no end time').to.be.undefined;
     });
 
-    test('timer tick test', function(assert) {
-        var done = assert.async();
-        var time = new timer();
+    it('timer tick test', function (done) {
+        const time = new Timer();
 
         time.tick('event1');
 
         setTimeout(function() {
-
             time.tick('event2');
 
-            var between = time.between('event1', 'event2');
-            assert.ok(between > 5 && between < 30000, 'between tick time is correctly calculated');
+            let between = time.between('event1', 'event2');
+            expect(between > 5 && between < 30000, 'between tick time is correctly calculated').to.be.true;
 
             between = time.between('no', 'value');
-            assert.equal(between, null, 'invalid tick events returns null');
-
+            expect(between, 'invalid tick events returns null').to.equal(null);
             done();
         }, 10);
     });
-
 });

@@ -1,1065 +1,1134 @@
-define([
-    'api/config',
-    'controller/instream-adapter',
-    'utils/underscore',
-    'controller/Setup',
-    'controller/captions',
-    'controller/model',
-    'controller/storage',
-    'playlist/playlist',
-    'playlist/loader',
-    'utils/helpers',
-    'view/view',
-    'utils/backbone.events',
-    'events/change-state-event',
-    'events/states',
-    'events/events',
-    'view/error',
-    'controller/events-middleware',
-    'controller/controls-loader'
-], function(Config, InstreamAdapter, _, Setup, Captions, Model, Storage,
-            Playlist, PlaylistLoader, utils, View, Events, changeStateEvent, states, events, error, eventsMiddleware,
-            ControlsLoader) {
+import instances from 'api/players';
+import { showView } from 'api/core-shim';
+import setConfig from 'api/set-config';
+import ApiQueueDecorator from 'api/api-queue';
+import PlaylistLoader from 'playlist/loader';
+import Playlist, { filterPlaylist, validatePlaylist, normalizePlaylistItem } from 'playlist/playlist';
+import Item from 'playlist/item';
+import InstreamAdapter from 'controller/instream-adapter';
+import Captions from 'controller/captions';
+import Model from 'controller/model';
+import View from 'view/view';
+import ViewModel from 'view/view-model';
+import changeStateEvent from 'events/change-state-event';
+import eventsMiddleware from 'controller/events-middleware';
+import Events from 'utils/backbone.events';
+import { AUTOPLAY_DISABLED, AUTOPLAY_MUTED, canAutoplay, startPlayback } from 'utils/can-autoplay';
+import { OS } from 'environment/environment';
+import { streamType } from 'providers/utils/stream-type';
+import cancelable from 'utils/cancelable';
+import { inInteraction } from 'utils/in-interaction-event';
+import { isUndefined, isBoolean } from 'utils/underscore';
+import { INITIAL_MEDIA_STATE } from 'model/player-model';
+import { PLAYER_STATE, STATE_BUFFERING, STATE_IDLE, STATE_COMPLETE, STATE_PAUSED, STATE_PLAYING, STATE_ERROR, STATE_LOADING,
+    STATE_STALLED, AUTOSTART_NOT_ALLOWED, MEDIA_BEFOREPLAY, PLAYLIST_LOADED, ERROR, PLAYLIST_COMPLETE, CAPTIONS_CHANGED, READY,
+    AD_PLAY, AD_PAUSE,
+    MEDIA_ERROR, MEDIA_COMPLETE, CAST_SESSION, FULLSCREEN, PLAYLIST_ITEM, MEDIA_VOLUME, MEDIA_MUTE, PLAYBACK_RATE_CHANGED,
+    CAPTIONS_LIST, RESIZE, MEDIA_VISUAL_QUALITY } from 'events/events';
+import ProgramController from 'program/program-controller';
+import initQoe from 'controller/qoe';
+import { BACKGROUND_LOAD_OFFSET } from 'program/program-constants';
+import { composePlayerError, convertToPlayerError, getPlayAttemptFailedErrorCode, MSG_CANT_PLAY_VIDEO, MSG_TECHNICAL_ERROR,
+    ERROR_COMPLETING_SETUP, ERROR_LOADING_PLAYLIST, ERROR_LOADING_PROVIDER, ERROR_LOADING_PLAYLIST_ITEM } from 'api/errors';
 
-    function _queueCommand(command) {
-        return function() {
-            var args = Array.prototype.slice.call(arguments, 0);
+// The model stores a different state than the provider
+function normalizeState(newstate) {
+    if (newstate === STATE_LOADING || newstate === STATE_STALLED) {
+        return STATE_BUFFERING;
+    }
+    return newstate;
+}
 
-            if (!this._model.getVideo()) {
-                this.eventsQueue.push([command, args]);
-            } else {
-                this['_' + command].apply(this, args);
+const Controller = function() {};
+const noop = function() {};
+
+Object.assign(Controller.prototype, {
+    setup(config, _api, originalContainer, eventListeners, commandQueue, mediaPool) {
+        const _this = this;
+        const _model = _this._model = new Model();
+
+        let _view;
+        let _captions;
+        let _beforePlay = false;
+        let _actionOnAttach;
+        let _stopPlaylist = false;
+        let _interruptPlay;
+        let _resumeAfterScrubbing = null;
+        let checkAutoStartCancelable = cancelable(_checkAutoStart);
+        let updatePlaylistCancelable = cancelable(noop);
+
+        _this.originalContainer = _this.currentContainer = originalContainer;
+        _this._events = eventListeners;
+
+        // Delegate trigger so we can run a middleware function before any event is bubbled through the API
+        _this.trigger = function (type, args) {
+            const data = eventsMiddleware(_model, type, args);
+            return Events.trigger.call(this, type, data);
+        };
+
+        let eventsReadyQueue = new ApiQueueDecorator(_this, [
+            'trigger',
+        ], () => true);
+
+        const _trigger = (type, event) => {
+            _this.trigger(type, event);
+        };
+
+        _model.setup(config);
+
+        const _backgroundLoading = _model.get('backgroundLoading');
+
+        const viewModel = new ViewModel(_model);
+
+        _view = this._view = new View(_api, viewModel);
+        _view.on('all', (type, event) => {
+            if (event && event.doNotForward) {
+                return;
+            }
+            _trigger(type, event);
+        }, _this);
+
+        const _programController = this._programController = new ProgramController(_model, mediaPool);
+        updateProgramSoundSettings();
+        addProgramControllerListeners();
+        initQoe(_model, _programController);
+
+        _model.on(ERROR, _this.triggerError, _this);
+
+        _model.on('change:state', (model, newstate, oldstate) => {
+            const adState = _getAdState();
+            if (!adState) {
+                changeStateEvent.call(this, model, newstate, oldstate);
+            }
+        }, this);
+
+        _model.on('change:castState', function(model, evt) {
+            _this.trigger(CAST_SESSION, evt);
+        });
+
+        _model.on('change:fullscreen', function(model, bool) {
+            _this.trigger(FULLSCREEN, {
+                fullscreen: bool
+            });
+            if (bool) {
+                // Stop autoplay behavior when the player enters fullscreen
+                model.set('playOnViewable', false);
+            }
+        });
+
+        _model.on('change:volume', function(model, vol) {
+            _this.trigger(MEDIA_VOLUME, {
+                volume: vol
+            });
+        });
+
+        _model.on('change:mute', function(model) {
+            _this.trigger(MEDIA_MUTE, {
+                mute: model.getMute()
+            });
+        });
+
+        _model.on('change:playbackRate', function(model, rate) {
+            _this.trigger(PLAYBACK_RATE_CHANGED, {
+                playbackRate: rate,
+                position: model.get('position')
+            });
+        });
+
+        const changeReason = function(model, reason) {
+            // Stop autoplay behavior if the video is started by the user or an api call
+            if (reason === 'clickthrough' || reason === 'interaction' || reason === 'external') {
+                _model.set('playOnViewable', false);
+                _model.off('change:playReason change:pauseReason', changeReason);
             }
         };
-    }
+        _model.on('change:playReason change:pauseReason', changeReason);
 
-    // The model stores a different state than the provider
-    function normalizeState(newstate) {
-        if (newstate === states.LOADING || newstate === states.STALLED) {
-            return states.BUFFERING;
-        }
-        return newstate;
-    }
+        // Listen for play and pause reasons from instream.
+        _this.on(AD_PLAY, event => changeReason(null, event.playReason));
+        _this.on(AD_PAUSE, event => changeReason(null, event.pauseReason));
 
-    var Controller = function(originalContainer) {
-        this.originalContainer = this.currentContainer = originalContainer;
-        this.eventsQueue = [];
-        _.extend(this, Events);
+        _model.on('change:scrubbing', function(model, state) {
+            if (state) {
+                _resumeAfterScrubbing = _model.get('state') !== STATE_PAUSED;
+                _pause();
+            } else if (_resumeAfterScrubbing) {
+                _play({ reason: 'interaction' });
+            }
+        });
 
-        this._model = new Model();
-    };
-
-    Controller.prototype = {
-        /** Controller API / public methods **/
-        play: _queueCommand('play'),
-        pause: _queueCommand('pause'),
-        seek: _queueCommand('seek'),
-        stop: _queueCommand('stop'),
-        load: _queueCommand('load'),
-        playlistNext: _queueCommand('next'),
-        playlistPrev: _queueCommand('prev'),
-        playlistItem: _queueCommand('item'),
-        setCurrentCaptions: _queueCommand('setCurrentCaptions'),
-        setCurrentQuality: _queueCommand('setCurrentQuality'),
-        setFullscreen: _queueCommand('setFullscreen'),
-        setup: function(options, _api) {
-            var _model = this._model;
-            var _view;
-            var _captions;
-            var _setup;
-            var _preplay = false;
-            var _actionOnAttach;
-            var _stopPlaylist = false;
-            var _interruptPlay;
-            var _this = this;
-            var _xo; // Intersection Observer - used for playing video on mobile when visible
-
-            var _video = function () {
-                return _model.getVideo();
-            };
-
-            var storage = new Storage();
-            storage.track(_model);
-            var config = new Config(options, storage);
-
-            var _eventQueuedUntilReady = [];
-
-            _model.setup(config, storage);
-            _view = this._view = new View(_api, _model);
-
-            _setup = new Setup(_api, _model, _view, _setPlaylist);
-
-            _setup.on(events.JWPLAYER_READY, _playerReady, this);
-            _setup.on(events.JWPLAYER_SETUP_ERROR, this.setupError, this);
-
-            _model.mediaController.on('all', _triggerAfterReady, this);
-            _model.mediaController.on(events.JWPLAYER_MEDIA_COMPLETE, function() {
-                // Insert a small delay here so that other complete handlers can execute
-                _.defer(_completeHandler);
+        // For onCaptionsList and onCaptionsChange
+        _model.on('change:captionsList', function(model, captionsList) {
+            _this.trigger(CAPTIONS_LIST, {
+                tracks: captionsList,
+                track: _model.get('captionsIndex') || 0
             });
-            _model.mediaController.on(events.JWPLAYER_MEDIA_ERROR, this.triggerError, this);
+        });
 
-            // If we attempt to load flash, assume it is blocked if we don't hear back within a second
-            _model.on('change:flashBlocked', function(model, isBlocked) {
-                if (!isBlocked) {
-                    this._model.set('errorEvent', undefined);
+        _model.on('change:mediaModel', function(model, mediaModel) {
+            model.set('errorEvent', undefined);
+            mediaModel.change('mediaState', function (changedMediaModel, state) {
+                if (!model.get('errorEvent')) {
+                    model.set(PLAYER_STATE, normalizeState(state));
+                }
+            }, this);
+            mediaModel.change('duration', function (changedMediaModel, duration) {
+                if (duration === 0) {
                     return;
                 }
-                // flashThrottle indicates whether this is a throttled event or plugin blocked event
-                var throttled = !!model.get('flashThrottle');
-                var errorEvent = {
-                    message: throttled ? 'Click to run Flash' : 'Flash plugin failed to load'
-                };
-                // Only dispatch an error for Flash blocked, not throttled events
-                if (!throttled) {
-                    this.trigger(events.JWPLAYER_ERROR, errorEvent);
-                }
-                this._model.set('errorEvent', errorEvent);
+                const minDvrWindow = model.get('minDvrWindow');
+                const type = streamType(duration, minDvrWindow);
+                model.setStreamType(type);
             }, this);
 
-            _model.on('change:state', changeStateEvent, this);
+            const index = model.get('item') + 1;
+            const recsAuto = (model.get('related') || {}).oncomplete === 'autoplay';
+            let item = model.get('playlist')[index];
+            if ((item || recsAuto) && _backgroundLoading) {
+                const onPosition = (changedMediaModel, position) => {
+                    // Do not background load DAI items because that item will be dynamically replaced before play
+                    const allowPreload = (item && !item.daiSetting);
+                    const duration = mediaModel.get('duration');
+                    if (allowPreload && position && duration > 0 && position >= duration - BACKGROUND_LOAD_OFFSET) {
+                        mediaModel.off('change:position', onPosition, this);
+                        _programController.backgroundLoad(item);
+                    } else if (recsAuto) {
+                        item = _model.get('nextUp');
+                    }
+                };
+                mediaModel.on('change:position', onPosition, this);
+            }
+        });
 
-            _model.on('change:duration', function(model, duration) {
-                var minDvrWindow = model.get('minDvrWindow');
-                var streamType = utils.streamType(duration, minDvrWindow);
-                model.set('streamType', streamType);
-            });
+        // Ensure captionsList event is raised after playlistItem
+        _captions = new Captions(_model);
+        _captions.on('all', _trigger, _this);
 
-            _model.on('change:castState', function(model, evt) {
-                _this.trigger(events.JWPLAYER_CAST_SESSION, evt);
-            });
-            _model.on('change:fullscreen', function(model, bool) {
-                _this.trigger(events.JWPLAYER_FULLSCREEN, {
-                    fullscreen: bool
-                });
-                if (bool) {
-                    // Stop autoplay behavior when the player enters fullscreen
-                    model.set('playOnViewable', false);
+        viewModel.on('viewSetup', (viewElement) => {
+            showView(this, viewElement);
+        });
+
+        this.playerReady = function() {
+
+            // Fire 'ready' once the view has resized so that player width and height are available
+            // (requires the container to be in the DOM)
+            _view.once(RESIZE, () => {
+                try {
+                    playerReadyNotify();
+                } catch (error) {
+                    _this.triggerError(convertToPlayerError(MSG_TECHNICAL_ERROR, ERROR_COMPLETING_SETUP, error));
                 }
             });
-            _model.on('itemReady', function() {
-                _this.triggerAfterReady(events.JWPLAYER_PLAYLIST_ITEM, {
-                    index: _model.get('item'),
-                    item: _model.get('playlistItem')
-                });
+
+            _view.init();
+        };
+
+        function playerReadyNotify() {
+            _model.change('visibility', _updateViewable);
+            eventsReadyQueue.off();
+
+            // Tell the api that we are loaded
+            _this.trigger(READY, {
+                // this will be updated by Api
+                setupTime: 0
             });
-            _model.on('change:playlist', function(model, playlist) {
+
+            _model.change('playlist', function(model, playlist) {
                 if (playlist.length) {
-                    var eventData = {
+                    const eventData = {
                         playlist: playlist
                     };
-                    var feedData = _model.get('feedData');
+                    const feedData = _model.get('feedData');
                     if (feedData) {
-                        var eventFeedData = _.extend({}, feedData);
+                        const eventFeedData = Object.assign({}, feedData);
                         delete eventFeedData.playlist;
                         eventData.feedData = eventFeedData;
                     }
-                    _this.triggerAfterReady(events.JWPLAYER_PLAYLIST_LOADED, eventData);
-                }
-            });
-            _model.on('change:volume', function(model, vol) {
-                _this.trigger(events.JWPLAYER_MEDIA_VOLUME, {
-                    volume: vol
-                });
-            });
-            _model.on('change:mute', function(model, mute) {
-                _this.trigger(events.JWPLAYER_MEDIA_MUTE, {
-                    mute: mute
-                });
-            });
-
-            _model.on('change:scrubbing', function(model, state) {
-                if (state) {
-                    _pause();
-                } else {
-                    _play({ reason: 'interaction' });
+                    _this.trigger(PLAYLIST_LOADED, eventData);
                 }
             });
 
-            // For onCaptionsList and onCaptionsChange
-            _model.on('change:captionsList', function(model, captionsList) {
-                try {
-                    _this.triggerAfterReady(events.JWPLAYER_CAPTIONS_LIST, {
-                        tracks: captionsList,
-                        track: _getCurrentCaptions()
-                    });
-                } catch (e) {
-                    utils.log('Error with captionsList event:', e);
-                }
-            });
-
-            _model.on('change:mediaModel', function(model) {
-                model.mediaModel.on('change:state', function(mediaModel, state) {
-                    var modelState = normalizeState(state);
-                    model.set('state', modelState);
-                });
-            });
-
-            // Ensure captionsList event is raised after playlistItem
-            _captions = new Captions(_api, _model);
-
-            function _triggerAfterReady(type, e) {
-                _this.triggerAfterReady(type, e);
-            }
-
-            function changeControls(model, enable) {
-                if (enable) {
-                    ControlsLoader.load()
-                        .then(function (Controls) {
-                            if (!_view.isSetup) {
-                                return;
-                            }
-
-                            var controls = new Controls(document, _view.element());
-                            _view.addControls(controls);
-                            controls.on('all', _triggerAfterReady, _this);
-                        })
-                        .catch(function (reason) {
-                            _this.triggerError({
-                                message: 'Controls failed to load',
-                                reason: reason
+            _model.change('playlistItem', function(model, playlistItem) {
+                if (playlistItem) {
+                    const { title, image } = playlistItem;
+                    if ('mediaSession' in navigator && window.MediaMetadata && (title || image)) {
+                        try {
+                            navigator.mediaSession.metadata = new window.MediaMetadata({
+                                title,
+                                artist: window.location.hostname,
+                                artwork: [
+                                    { src: image || '' }
+                                ]
                             });
-                        });
-                } else {
-                    _view.removeControls();
-                }
-
-                _this.trigger(events.JWPLAYER_CONTROLS, {
-                    controls: enable
-                });
-            }
-
-            _model.on('change:viewSetup', function(model, viewSetup) {
-                if (viewSetup) {
-                    _this.showView(_view.element());
-                }
-            });
-
-            _model.on('change:inDom', function(model, inDom) {
-                if (inDom) {
-                    _observePlayerContainer(_view.element());
-
-                    model.off('change:controls', changeControls);
-                    model.change('controls', changeControls);
-                }
-            });
-
-            function _playerReady() {
-                _setup = null;
-
-                _view.on('all', _triggerAfterReady, _this);
-
-                _updateVisibility();
-                _updateViewable();
-
-                _model.on('change:activeTab', _updateVisibility);
-                _model.on('change:fullscreen', _updateVisibility);
-                _model.on('change:intersectionRatio', _updateVisibility);
-                _model.on('change:visibility', _onVisibilityChange);
-
-                var related = _api.getPlugin('related');
-                if (related) {
-                    related.on('nextUp', _model.setNextUp, _model);
-                }
-
-                // Fire 'ready' once the view has resized so that player width and height are available
-                // (requires the container to be in the DOM)
-                _view.once(events.JWPLAYER_RESIZE, _playerReadyNotify);
-
-                _view.init();
-            }
-
-            function _playerReadyNotify() {
-                // Tell the api that we are loaded
-                _this.trigger(events.JWPLAYER_READY, {
-                    // this will be updated by Api
-                    setupTime: 0
-                });
-
-                // Stop queueing certain events
-                _this.triggerAfterReady = _this.trigger;
-
-                // Send queued events
-                for (var i = 0; i < _eventQueuedUntilReady.length; i++) {
-                    var event = _eventQueuedUntilReady[i];
-                    _preplay = (event.type === events.JWPLAYER_MEDIA_BEFOREPLAY);
-                    _this.trigger(event.type, event.args);
-                    _preplay = false;
-                }
-
-                _checkAutoStart();
-            }
-
-            function _observePlayerContainer(container) {
-                if (!container) {
-                    return;
-                }
-                if (!window.IntersectionObserver) {
-                    return;
-                }
-                _stopObserving();
-                // Fire the callback every time 25% of the player comes in/out of view
-                _xo = new window.IntersectionObserver(_onIntersection, { threshold: [0, 0.25, 0.5, 0.75, 1] });
-                _xo.observe(container);
-            }
-
-            function _stopObserving() {
-                if (_xo) {
-                    _xo.disconnect();
-                    _xo = undefined;
-                }
-            }
-
-            function _onIntersection(entries) {
-                if (entries && entries.length) {
-                    var entry = entries[0];
-                    if (entry.target === _this.getContainer()) {
-                        _model.set('intersectionRatio', entry.intersectionRatio);
-                    }
-                }
-            }
-
-            function _getVisibility() {
-                // Set visibility to 1 if we're in fullscreen
-                if (_model.get('fullscreen')) {
-                    return 1;
-                }
-
-                // Set visibility to 0 if we're not in the active tab
-                if (!_model.get('activeTab')) {
-                    return 0;
-                }
-                // Otherwise, set it to the intersection ratio reported from the intersection observer
-                var intersectionRatio = _model.get('intersectionRatio');
-
-                if (_.isUndefined(intersectionRatio)) {
-                    // Get intersectionRatio through brute force
-                    intersectionRatio = _computeVisibility(_view.element());
-                }
-
-                return intersectionRatio;
-            }
-
-            function _computeVisibility(target) {
-                var html = document.documentElement;
-                var body = document.body;
-                var rootRect = {
-                    top: 0,
-                    left: 0,
-                    right: html.clientWidth || body.clientWidth,
-                    width: html.clientWidth || body.clientWidth,
-                    bottom: html.clientHeight || body.clientHeight,
-                    height: html.clientHeight || body.clientHeight
-                };
-
-                if (!body.contains(target)) {
-                    return 0;
-                }
-                var targetRect = target.getBoundingClientRect();
-
-                var intersectionRect = targetRect;
-                var parent = target.parentNode;
-                var atRoot = false;
-
-                while (!atRoot) {
-                    var parentRect = null;
-                    if (!parent || parent.nodeType !== 1) {
-                        atRoot = true;
-                        parentRect = rootRect;
-                    } else if (window.getComputedStyle(parent).overflow !== 'visible') {
-                        parentRect = utils.bounds(parent);
-                    }
-                    if (parentRect) {
-                        intersectionRect = computeRectIntersection(parentRect, intersectionRect);
-                        if (!intersectionRect) {
-                            return 0;
+                        } catch (error) {
+                            // catch error that occurs when mediaSession fails to setup
                         }
                     }
-                    parent = parent.parentNode;
+                    model.set('cues', []);
+                    _this.trigger(PLAYLIST_ITEM, {
+                        index: _model.get('item'),
+                        item: playlistItem
+                    });
                 }
-                var targetArea = targetRect.width * targetRect.height;
-                var intersectionArea = intersectionRect.width * intersectionRect.height;
-                return targetArea ? (intersectionArea / targetArea) : 0;
-            }
+            });
 
-            function computeRectIntersection(rect1, rect2) {
-                var top = Math.max(rect1.top, rect2.top);
-                var bottom = Math.min(rect1.bottom, rect2.bottom);
-                var left = Math.max(rect1.left, rect2.left);
-                var right = Math.min(rect1.right, rect2.right);
-                var width = right - left;
-                var height = bottom - top;
-                return (width >= 0 && height >= 0) && {
-                    top: top,
-                    bottom: bottom,
-                    left: left,
-                    right: right,
-                    width: width,
-                    height: height
-                };
-            }
+            eventsReadyQueue.flush();
+            eventsReadyQueue.destroy();
+            eventsReadyQueue = null;
 
-            function _updateVisibility() {
-                _model.set('visibility', _getVisibility());
-            }
+            _model.change('viewable', viewableChange);
+            _model.change('viewable', _checkPlayOnViewable);
 
-            function _updateViewable() {
-                var visibility = _model.get('visibility');
-                if (!_.isUndefined(visibility)) {
-                    _model.set('viewable', Math.round(visibility));
-                }
-            }
-
-            function _checkAutoStart() {
-                var autostart = _model.get('autostart');
-                if (!utils.isMobile() && autostart === true) {
-                    // Autostart immediately if we're not mobile and not waiting for the player to become viewable first
-                    _autoStart();
-                } else {
-                    _onVisibilityChange(_model, _model.get('visibility'));
-                }
-            }
-
-            function _onVisibilityChange() {
-                _updateViewable();
-                var viewable = _model.get('viewable');
-                if (_model.get('playOnViewable')) {
-                    if (viewable) {
-                        _autoStart();
-                    } else if (utils.isMobile()) {
-                        _this.pause({ reason: 'autostart' });
-                    }
-                }
-            }
-
-            this.triggerAfterReady = function(type, args) {
-                _eventQueuedUntilReady.push({
-                    type: type,
-                    args: args
+            if (_model.get('autoPause').viewability) {
+                _model.change('viewable', _checkPauseOnViewable);
+            } else {
+                _model.once('change:autostartFailed change:mute', function(model) {
+                    model.off('change:viewable', _checkPlayOnViewable);
                 });
-            };
+            }
 
-            function _loadProvidersForPlaylist(playlist) {
-                var providersManager = _model.getProviders();
-                var providersNeeded = providersManager.required(playlist, _model.get('primary'));
-                return providersManager.load(providersNeeded)
-                    .then(function() {
-                        if (!_this.getProvider()) {
-                            _model.setProvider(_model.get('playlistItem'));
+            // Run _checkAutoStart() last
+            // 'viewable' changes can result in preload() being called on the initial provider instance
+            _checkAutoStart();
 
-                            _executeQueuedEvents();
+            _model.on('change:itemReady', (changeModel, itemReady) => {
+                if (itemReady) {
+                    apiQueue.flush();
+                }
+            });
+        }
+
+        function _updateViewable(model, visibility) {
+            if (!isUndefined(visibility)) {
+                _model.set('viewable', Math.round(visibility));
+            }
+        }
+
+        function _checkAutoStart() {
+            if (!apiQueue) {
+                // this player has been destroyed
+                return;
+            }
+
+            // Autostart immediately if we're not waiting for the player to become viewable first.
+            if (_model.get('autostart') === true && !_model.get('playOnViewable')) {
+                _autoStart('autostart');
+            }
+            apiQueue.flush();
+        }
+
+        function viewableChange(model, viewable) {
+            _this.trigger('viewable', {
+                viewable: viewable
+            });
+
+            preload();
+        }
+
+        function preload() {
+            // Only attempt to preload if this is the first player on the page or viewable
+            if (instances[0] !== _api && _model.get('viewable') !== 1) {
+                return;
+            }
+            if (_model.get('state') === 'idle' && _model.get('autostart') === false) {
+                // If video has not been primed on Android, test that video will play before preloading
+                // This ensures we always prime the tag on play when necessary
+                if (!mediaPool.primed() && OS.android) {
+                    const video = mediaPool.getTestElement();
+                    const muted = _this.getMute();
+                    Promise.resolve().then(() => startPlayback(video, { muted })).then(() => {
+                        if (_model.get('state') === 'idle') {
+                            _programController.preloadVideo();
+                        }
+                    }).catch(noop);
+                } else {
+                    _programController.preloadVideo();
+                }
+            }
+        }
+
+        function _pauseAfterAd(viewable) {
+            _this._instreamAdapter.noResume = !viewable;
+            if (!viewable) {
+                _updatePauseReason({ reason: 'viewable' });
+            }
+        }
+
+        function _pauseWhenNotViewable(viewable) {
+            if (!viewable) {
+                _this.pause({ reason: 'viewable' });
+                _model.set('playOnViewable', !viewable);
+            }
+        }
+
+        function _checkPlayOnViewable(model, viewable) {
+            const adState = _getAdState();
+            if (model.get('playOnViewable')) {
+                if (viewable) {
+                    const reason = 'viewable';
+                    if (model.get('state') === STATE_IDLE) {
+                        _autoStart(reason);
+                    } else {
+                        _play({ reason });
+                    }
+                } else if (OS.mobile && !adState) {
+                    _this.pause({ reason: 'autostart' });
+                    _model.set('playOnViewable', true);
+                }
+
+                if (OS.mobile && adState) {
+                    // If during an ad on mobile, we should always be paused after the ad,
+                    // if not viewable, regardless of autoPause setting.
+                    _pauseAfterAd(viewable);
+                }
+            }
+        }
+
+        function _checkPauseOnViewable(model, viewable) {
+            const playerState = model.get('state');
+            const adState = _getAdState();
+            const playReason = model.get('playReason');
+
+            if (adState) {
+                _pauseAfterAd(viewable);
+            } else if (playerState === STATE_PLAYING || playerState === STATE_BUFFERING) {
+                _pauseWhenNotViewable(viewable);
+            } else if (playerState === STATE_IDLE && playReason === 'playlist') {
+                // After VAST ads, instream is destroyed and player state is 'idle'
+                model.once('change:state', () => {
+                    _pauseWhenNotViewable(viewable);
+                });
+            }
+        }
+
+        function _load(item, feedData) {
+            const instream = _this._instreamAdapter;
+            if (instream) {
+                instream.noResume = true;
+            }
+            _this.trigger('destroyPlugin', {});
+            _stop(true);
+
+            checkAutoStartCancelable.cancel();
+            checkAutoStartCancelable = cancelable(_checkAutoStart);
+            updatePlaylistCancelable.cancel();
+
+            if (inInteraction()) {
+                mediaPool.prime();
+            }
+
+            let loadPromise;
+
+            switch (typeof item) {
+                case 'string': {
+                    _model.attributes.item = 0;
+                    _model.attributes.itemReady = false;
+                    updatePlaylistCancelable = cancelable((data) => {
+                        if (data) {
+                            return _this.updatePlaylist(Playlist(data.playlist), data);
                         }
                     });
-            }
-
-            function _executeQueuedEvents() {
-                while (_this.eventsQueue.length > 0) {
-                    var q = _this.eventsQueue.shift();
-                    var method = q[0];
-                    var args = q[1] || [];
-                    _this['_' + method].apply(_this, args);
+                    loadPromise = _loadPlaylist(item).then(updatePlaylistCancelable.async);
+                    break;
                 }
+                case 'object':
+                    _model.attributes.item = 0;
+                    loadPromise = _this.updatePlaylist(Playlist(item), feedData || {});
+                    break;
+                case 'number':
+                    loadPromise = _this.setItemIndex(item);
+                    break;
+                default:
+                    return;
             }
+            // Catch playlist exceptions. Item exceptions are caught first from setActiveItem.
+            loadPromise.catch(error => {
+                _this.triggerError(composePlayerError(error, ERROR_LOADING_PLAYLIST));
+            });
 
-            function _load(item, feedData) {
-                if (_model.get('state') === states.ERROR) {
-                    _model.set('state', states.IDLE);
-                }
-                _model.set('preInstreamState', 'instream-idle');
+            loadPromise.then(checkAutoStartCancelable.async).catch(noop);
+        }
 
-                _this.trigger('destroyPlugin', {});
-                _stop(true);
-
-                _model.once('itemReady', _checkAutoStart);
-
-                switch (typeof item) {
-                    case 'string':
-                        _loadPlaylist(item);
-                        break;
-                    case 'object':
-                        var success = _setPlaylist(item, feedData);
-                        if (success) {
-                            _setItem(0);
-                        }
-                        break;
-                    case 'number':
-                        _setItem(item);
-                        break;
-                    default:
-                        break;
-                }
-            }
-
-            function _loadPlaylist(toLoad) {
-                var loader = new PlaylistLoader();
-                loader.on(events.JWPLAYER_PLAYLIST_LOADED, function(data) {
-                    _load(data.playlist, data);
+        function _loadPlaylist(toLoad) {
+            return new Promise((resolve, reject) => {
+                const loader = new PlaylistLoader();
+                loader.on(PLAYLIST_LOADED, function(data) {
+                    resolve(data);
                 });
-                loader.on(events.JWPLAYER_ERROR, function(evt) {
-                    evt.message = 'Error loading playlist: ' + evt.message;
-                    this.triggerError(evt);
-                }, this);
+                loader.on(ERROR, reject, this);
                 loader.load(toLoad);
+            });
+        }
+
+        function _getAdState() {
+            const instream = _this._instreamAdapter;
+            if (instream) {
+                return instream.getState();
+            }
+            return false;
+        }
+
+        function _getState() {
+            const adState = _getAdState();
+            if (adState) {
+                return adState;
+            }
+            return _model.get('state');
+        }
+
+        function _play(meta) {
+            checkAutoStartCancelable.cancel();
+            _stopPlaylist = false;
+
+            if (_model.get('state') === STATE_ERROR) {
+                return Promise.resolve();
             }
 
-            function _getAdState() {
-                return _this._instreamAdapter && _this._instreamAdapter.getState();
+            const playReason = _getReason(meta);
+            _model.set('playReason', playReason);
+
+            const adState = _getAdState();
+            const pauseReason = _model.get('pauseReason');
+            if (adState && pauseReason === 'viewable' && playReason !== 'interaction') {
+                return;
             }
 
-            function _getState() {
-                var adState = _getAdState();
-                if (_.isString(adState)) {
-                    return adState;
-                }
-                return _model.get('state');
+            if (adState) {
+                // this will resume the ad. _api.playAd would load a new ad
+                _api.pauseAd(false, meta);
+                return Promise.resolve();
             }
 
-            function _play(meta) {
-                if (meta) {
-                    _model.set('playReason', meta.reason);
+            if (_model.get('state') === STATE_COMPLETE) {
+                _stop(true);
+                _this.setItemIndex(0);
+            }
+
+            if (!_beforePlay) {
+                _beforePlay = true;
+                _this.trigger(MEDIA_BEFOREPLAY, {
+                    playReason,
+                    startTime: meta && meta.startTime ? meta.startTime : _model.get('playlistItem').starttime
+                });
+                _beforePlay = false;
+
+                if (inInteraction() && !mediaPool.primed()) {
+                    mediaPool.prime();
                 }
 
-                if (_model.get('state') === states.ERROR) {
-                    return;
+                if (playReason === 'playlist' && _model.get('autoPause').viewability) {
+                    _checkPauseOnViewable(_model, _model.get('viewable'));
                 }
 
-                var adState = _getAdState();
-                if (_.isString(adState)) {
-                    // this will resume the ad. _api.playAd would load a new ad
-                    _api.pauseAd(false);
-                    return;
-                }
-
-                if (_model.get('state') === states.COMPLETE) {
-                    _stop(true);
-                    _setItem(0);
-                }
-
-                if (!_preplay) {
-                    _preplay = true;
-                    _this.triggerAfterReady(events.JWPLAYER_MEDIA_BEFOREPLAY, { playReason: _model.get('playReason') });
-                    _preplay = false;
-                    if (_interruptPlay) {
-                        _interruptPlay = false;
-                        _actionOnAttach = null;
-                        return;
+                if (_interruptPlay) {
+                    // Force tags to prime if we're about to play an ad
+                    // Resetting the source in order to prime is OK since we'll be switching it anyway
+                    if (inInteraction() && !_backgroundLoading) {
+                        _model.get('mediaElement').load();
                     }
-                }
-
-                // TODO: The state is idle while providers load
-                var status;
-                if (_isIdle()) {
-                    if (_model.get('playlist').length === 0) {
-                        return;
-                    }
-                    status = utils.tryCatch(function() {
-                        // FIXME: playAttempt is not triggered until this is called. Should be on play()
-                        _model.loadVideo();
-                    });
-                } else if (_model.get('state') === states.PAUSED) {
-                    status = utils.tryCatch(function() {
-                        _model.playVideo();
-                    });
-                }
-
-                if (status instanceof utils.Error) {
-                    _this.triggerError(status);
+                    _interruptPlay = false;
                     _actionOnAttach = null;
+                    return Promise.resolve();
                 }
             }
 
-            function _autoStart() {
-                _play({ reason: 'autostart' });
+            return _programController.playVideo(playReason)
+                // If playback succeeded that means we captured a gesture (and used it to prime the pool)
+                // Avoid priming again in beforePlay because it could cause BGL'd media to be source reset
+                .then(mediaPool.played);
+        }
+
+        function _getReason(meta) {
+            if (meta && meta.reason) {
+                return meta.reason;
+            }
+            return 'unknown';
+        }
+
+        function _autoStart(reason) {
+            const state = _getState();
+            if (state !== STATE_IDLE) {
+                return;
             }
 
-            function _stop(internal) {
-                // Reset the autostart play
-                _model.off('itemReady', _autoStart);
+            // Reset cancelable for new autoplay test below.
+            checkAutoStartCancelable = cancelable(_checkAutoStart);
 
-                var fromApi = !internal;
+            // Detect and store browser autoplay setting in the model.
+            const adConfig = _model.get('advertising');
+            canAutoplay(mediaPool, {
+                cancelable: checkAutoStartCancelable,
+                muted: _this.getMute(),
+                allowMuted: adConfig ? adConfig.autoplayadsmuted : true
+            }).then(result => {
+                _model.set('canAutoplay', result);
 
-                _actionOnAttach = null;
+                // Only apply autostartMuted on un-muted autostart attempt.
+                if (result === AUTOPLAY_MUTED && !_this.getMute()) {
+                    _model.set('autostartMuted', true);
+                    updateProgramSoundSettings();
 
-                var status = utils.tryCatch(function() {
-                    _model.stopVideo();
-                }, _this);
-
-                if (status instanceof utils.Error) {
-                    _this.triggerError(status);
-                    return false;
+                    _model.once('change:autostartMuted', function(model) {
+                        model.off('change:viewable', _checkPlayOnViewable);
+                        _this.trigger(MEDIA_MUTE, { mute: _model.getMute() });
+                    });
                 }
 
-                if (fromApi) {
-                    _stopPlaylist = true;
+                if (_this.getMute() && _model.get('enableDefaultCaptions')) {
+                    _captions.selectDefaultIndex(1);
                 }
 
-                if (_preplay) {
-                    _interruptPlay = true;
+                return _play({ reason }).catch(() => {
+                    if (!_this._instreamAdapter) {
+                        _model.set('autostartFailed', true);
+                    }
+                    _actionOnAttach = null;
+                });
+            }).catch(error => {
+                _model.set('canAutoplay', AUTOPLAY_DISABLED);
+                _model.set('autostart', false);
+                // Emit event unless test was explicitly canceled.
+                if (!checkAutoStartCancelable.cancelled()) {
+                    const code = getPlayAttemptFailedErrorCode(error);
+                    _this.trigger(AUTOSTART_NOT_ALLOWED, {
+                        reason: error.reason,
+                        code,
+                        error
+                    });
                 }
+            });
+        }
 
+        function _stop(internal) {
+            checkAutoStartCancelable.cancel();
+            apiQueue.empty();
+
+            const adState = _getAdState();
+            if (adState) {
+                const instream = _this._instreamAdapter;
+                if (instream) {
+                    instream.noResume = true;
+                }
+                _actionOnAttach = () => _programController.stopVideo();
+                return;
+            }
+
+            const fromApi = !internal;
+
+            _actionOnAttach = null;
+
+            if (fromApi) {
+                _stopPlaylist = true;
+            }
+
+            if (_beforePlay) {
+                _interruptPlay = true;
+            }
+
+            _model.set('errorEvent', undefined);
+            _programController.stopVideo();
+        }
+
+        function _updatePauseReason(meta) {
+            const pauseReason = _getReason(meta);
+            _model.set('pauseReason', pauseReason);
+            _model.set('playOnViewable', (pauseReason === 'viewable'));
+        }
+
+        function _pause(meta) {
+            _actionOnAttach = null;
+            checkAutoStartCancelable.cancel();
+
+            const adState = _getAdState();
+            if (adState && adState !== STATE_PAUSED) {
+                _updatePauseReason(meta);
+                _api.pauseAd(true, meta);
+                return;
+            }
+
+            switch (_model.get('state')) {
+                case STATE_ERROR:
+                    return;
+                case STATE_PLAYING:
+                case STATE_BUFFERING: {
+                    _updatePauseReason(meta);
+                    _programController.pause();
+                    break;
+                }
+                default:
+                    if (_beforePlay) {
+                        _interruptPlay = true;
+                    }
+            }
+        }
+
+        function _isIdle() {
+            const state = _model.get('state');
+            return (state === STATE_IDLE || state === STATE_COMPLETE || state === STATE_ERROR);
+        }
+
+        function _seek(pos, meta) {
+            const state = _model.get('state');
+            if (state === STATE_ERROR) {
+                return;
+            }
+            _programController.position = pos;
+            const isIdle = state === STATE_IDLE;
+            if (!_model.get('scrubbing') && (isIdle || state === STATE_COMPLETE)) {
+                if (isIdle) {
+                    meta = meta || {};
+                    meta.startTime = pos;
+                }
+                this.play(meta);
+            }
+        }
+
+        function _item(index, meta) {
+            _stop(true);
+            _this.setItemIndex(index);
+            // Use this.play() so that command is queued until after "playlistItem" event
+            _this.play(meta);
+        }
+
+        function _prev(meta) {
+            _item(_model.get('item') - 1, meta);
+        }
+
+        function _next(meta) {
+            _item(_model.get('item') + 1, meta);
+        }
+
+        function _completeCancelled() {
+            if (!_isIdle()) {
+                // Something has made an API call before the complete handler has fired.
+                return true;
+            } else if (_stopPlaylist) {
+                // Stop called in onComplete event listener
+                _stopPlaylist = false;
                 return true;
             }
 
-            function _pause(meta) {
-                _actionOnAttach = null;
+            return false;
+        }
 
-                if (meta) {
-                    _model.set('pauseReason', meta.reason);
-                    // Stop autoplay behavior if the video is paused by the user or an api call
-                    if (meta.reason === 'interaction' || meta.reason === 'external') {
-                        _model.set('playOnViewable', false);
+        function _shouldAutoAdvance() {
+            // If it's the last item in the playlist
+            const idx = _model.get('item');
+            return idx !== _model.get('playlist').length - 1;
+        }
+        function _completeHandler() {
+            if (_this.completeCancelled()) {
+                return;
+            }
+
+            _actionOnAttach = _this.completeHandler;
+
+            if (!_this.shouldAutoAdvance()) {
+                if (_model.get('repeat')) {
+                    _next({ reason: 'repeat' });
+                } else {
+                    // Exit fullscreen on IOS so that our overlays show to the user
+                    if (OS.iOS) {
+                        _setFullscreen(false);
                     }
-                }
-
-                var adState = _getAdState();
-                if (_.isString(adState)) {
-                    _api.pauseAd(true);
-                    return;
-                }
-
-                switch (_model.get('state')) {
-                    case states.ERROR:
-                        return;
-                    case states.PLAYING:
-                    case states.BUFFERING:
-                        var status = utils.tryCatch(function() {
-                            _video().pause();
-                        }, this);
-
-                        if (status instanceof utils.Error) {
-                            _this.triggerError(status);
-                            return;
-                        }
-                        break;
-                    default:
-                        if (_preplay) {
-                            _interruptPlay = true;
-                        }
+                    // Autoplay/pause no longer needed since there's no more media to play
+                    // This prevents media from replaying when a completed video scrolls into view
+                    _model.set('playOnViewable', false);
+                    _model.set('state', STATE_COMPLETE);
+                    _this.trigger(PLAYLIST_COMPLETE, {});
                 }
                 return;
             }
 
-            function _isIdle() {
-                var state = _model.get('state');
-                return (state === states.IDLE || state === states.COMPLETE || state === states.ERROR);
+            _this.nextItem();
+        }
+
+        function _setCurrentQuality(index) {
+            _programController.quality = index;
+        }
+
+        function _getCurrentQuality() {
+            return _programController.quality;
+        }
+
+        function _getConfig() {
+            return this._model ? this._model.getConfiguration() : undefined;
+        }
+
+        function _getVisualQuality() {
+            const mediaModel = this._model.get('mediaModel');
+            if (mediaModel) {
+                return mediaModel.get(MEDIA_VISUAL_QUALITY);
             }
+            return null;
+        }
 
-            function _seek(pos, meta) {
-                if (_model.get('state') === states.ERROR) {
-                    return;
-                }
-                if (!_model.get('scrubbing') && _model.get('state') !== states.PLAYING) {
-                    _play(meta);
-                }
-                _video().seek(pos);
-            }
+        function _getQualityLevels() {
+            return _programController.qualities;
+        }
 
-            function _item(index, meta) {
-                _stop(true);
-                if (_model.get('state') === states.ERROR) {
-                    _model.set('state', states.IDLE);
-                }
-                _setItem(index);
-                _play(meta);
-            }
+        function _setCurrentAudioTrack(index) {
+            _programController.audioTrack = index;
+        }
 
-            function _setPlaylist(array, feedData) {
-                _model.set('feedData', feedData);
+        function _getCurrentAudioTrack() {
+            return _programController.audioTrack;
+        }
 
-                var playlist = Playlist(array);
-                playlist = Playlist.filterPlaylist(playlist, _model, feedData);
+        function _getAudioTracks() {
+            return _programController.audioTracks;
+        }
 
-                _model.set('playlist', playlist);
+        function _setCurrentCaptions(index) {
+            index = parseInt(index, 10) || 0;
 
-                if (!_.isArray(playlist) || playlist.length === 0) {
-                    _this.triggerError({
-                        message: 'Error loading playlist: No playable sources found'
-                    });
-                    return false;
-                }
+            _model.persistVideoSubtitleTrack(index);
+            _programController.subtitles = index;
 
-                _loadProvidersForPlaylist(playlist);
-
-                return true;
-            }
-
-            function _setItem(index) {
-                _model.setItemIndex(index);
-            }
-
-            function _prev(meta) {
-                _item(_model.get('item') - 1, meta || { reason: 'external' });
-            }
-
-            function _next(meta) {
-                _item(_model.get('item') + 1, meta || { reason: 'external' });
-            }
-
-            function _completeHandler() {
-                if (!_isIdle()) {
-                    // Something has made an API call before the complete handler has fired.
-                    return;
-                } else if (_stopPlaylist) {
-                    // Stop called in onComplete event listener
-                    _stopPlaylist = false;
-                    return;
-                }
-
-                _actionOnAttach = _completeHandler;
-
-                var idx = _model.get('item');
-                if (idx === _model.get('playlist').length - 1) {
-                    // If it's the last item in the playlist
-                    if (_model.get('repeat')) {
-                        _next({ reason: 'repeat' });
-                    } else {
-                        // Autoplay/pause no longer needed since there's no more media to play
-                        // This prevents media from replaying when a completed video scrolls into view
-                        _model.set('playOnViewable', false);
-                        _model.set('state', states.COMPLETE);
-                        _this.trigger(events.JWPLAYER_PLAYLIST_COMPLETE, {});
-                    }
-                    return;
-                }
-
-                // It wasn't the last item in the playlist,
-                //  so go to the next one
-                _next({ reason: 'playlist' });
-            }
-
-            function _setCurrentQuality(index) {
-                if (_video()) {
-                    index = parseInt(index, 10) || 0;
-                    _video().setCurrentQuality(index);
-                }
-            }
-
-            function _getCurrentQuality() {
-                if (_video()) {
-                    return _video().getCurrentQuality();
-                }
-                return -1;
-            }
-
-            function _getConfig() {
-                return this._model ? this._model.getConfiguration() : undefined;
-            }
-
-            function _getVisualQuality() {
-                if (this._model.mediaModel) {
-                    return this._model.mediaModel.get('visualQuality');
-                }
-                // if quality is not implemented in the provider,
-                // return quality info based on current level
-                var qualityLevels = _getQualityLevels();
-                if (qualityLevels) {
-                    var levelIndex = _getCurrentQuality();
-                    var level = qualityLevels[levelIndex];
-                    if (level) {
-                        return {
-                            level: _.extend({
-                                index: levelIndex
-                            }, level),
-                            mode: '',
-                            reason: ''
-                        };
-                    }
-                }
-                return null;
-            }
-
-            function _getQualityLevels() {
-                if (_video()) {
-                    return _video().getQualityLevels();
-                }
-                return null;
-            }
-
-            function _setCurrentAudioTrack(index) {
-                if (_video()) {
-                    index = parseInt(index, 10) || 0;
-                    _video().setCurrentAudioTrack(index);
-                }
-            }
-
-            function _getCurrentAudioTrack() {
-                if (_video()) {
-                    return _video().getCurrentAudioTrack();
-                }
-                return -1;
-            }
-
-            function _getAudioTracks() {
-                if (_video()) {
-                    return _video().getAudioTracks();
-                }
-                return null;
-            }
-
-            function _setCurrentCaptions(index) {
-                index = parseInt(index, 10) || 0;
-
-                // update provider subtitle track
-                _model.persistVideoSubtitleTrack(index);
-
-                _this.trigger(events.JWPLAYER_CAPTIONS_CHANGED, {
-                    tracks: _getCaptionsList(),
-                    track: index
-                });
-
-            }
-
-            function _getCurrentCaptions() {
-                return _captions.getCurrentIndex();
-            }
-
-            function _getCaptionsList() {
-                return _captions.getCaptionsList();
-            }
-
-            /** Used for the InStream API **/
-            function _detachMedia() {
-                return _model.detachMedia();
-            }
-
-            function _attachMedia() {
-                // Called after instream ends
-                var status = utils.tryCatch(function() {
-                    _model.attachMedia();
-                });
-
-                if (status instanceof utils.Error) {
-                    utils.log('Error calling _attachMedia', status);
-                    return;
-                }
-
-                if (typeof _actionOnAttach === 'function') {
-                    _actionOnAttach();
-                }
-            }
-
-            function _setFullscreen(state) {
-                if (!_.isBoolean(state)) {
-                    state = !_model.get('fullscreen');
-                }
-
-                _model.set('fullscreen', state);
-                if (this._instreamAdapter && this._instreamAdapter._adModel) {
-                    this._instreamAdapter._adModel.set('fullscreen', state);
-                }
-            }
-
-            function _nextUp() {
-                var related = _api.getPlugin('related');
-                if (related) {
-                    related.next();
-                }
-            }
-
-            /** Controller API / public methods **/
-            this._play = _play;
-            this._pause = _pause;
-            this._seek = _seek;
-            this._stop = _stop;
-            this._load = _load;
-            this._next = _next;
-            this._prev = _prev;
-            this._item = _item;
-            this._setCurrentCaptions = _setCurrentCaptions;
-            this._setCurrentQuality = _setCurrentQuality;
-            this._setFullscreen = _setFullscreen;
-
-            this.detachMedia = _detachMedia;
-            this.attachMedia = _attachMedia;
-            this.getCurrentQuality = _getCurrentQuality;
-            this.getQualityLevels = _getQualityLevels;
-            this.setCurrentAudioTrack = _setCurrentAudioTrack;
-            this.getCurrentAudioTrack = _getCurrentAudioTrack;
-            this.getAudioTracks = _getAudioTracks;
-            this.getCurrentCaptions = _getCurrentCaptions;
-            this.getCaptionsList = _getCaptionsList;
-            this.getVisualQuality = _getVisualQuality;
-            this.getConfig = _getConfig;
-            this.getState = _getState;
-
-            // Model passthroughs
-            this.setVolume = _model.setVolume.bind(_model);
-            this.setMute = _model.setMute.bind(_model);
-            this.getProvider = function() {
-                return _model.get('provider');
-            };
-            this.getWidth = function() {
-                return _model.get('containerWidth');
-            };
-            this.getHeight = function() {
-                return _model.get('containerHeight');
-            };
-
-            // View passthroughs
-            this.getContainer = function() {
-                return this.currentContainer;
-            };
-            this.resize = _view.resize;
-            this.getSafeRegion = _view.getSafeRegion;
-            this.setCues = _view.addCues;
-            this.setCaptions = _view.setCaptions;
-            this.next = _nextUp;
-
-            this.addButton = function(img, tooltip, callback, id, btnClass) {
-                var newButton = {
-                    img: img,
-                    tooltip: tooltip,
-                    callback: callback,
-                    id: id,
-                    btnClass: btnClass
-                };
-                var replaced = false;
-                var dock = _.map(_model.get('dock'), function(dockButton) {
-                    var replaceButton =
-                        dockButton !== newButton &&
-                        dockButton.id === newButton.id;
-
-                    // replace button if its of the same id/type,
-                    // but has different values
-                    if (replaceButton) {
-                        replaced = true;
-                        return newButton;
-                    }
-                    return dockButton;
-                });
-
-                // add button if it has not been replaced
-                if (!replaced) {
-                    dock.push(newButton);
-                }
-
-                _model.set('dock', dock);
-            };
-
-            this.removeButton = function(id) {
-                var dock = _model.get('dock') || [];
-                dock = _.reject(dock, _.matches({ id: id }));
-                _model.set('dock', dock);
-            };
-
-            this.checkBeforePlay = function() {
-                return _preplay;
-            };
-
-            this.getItemQoe = function() {
-                return _model._qoeItem;
-            };
-
-            this.setControls = function (mode) {
-                if (!_.isBoolean(mode)) {
-                    mode = !_model.get('controls');
-                }
-                _model.set('controls', mode);
-
-                var provider = _model.getVideo();
-                if (provider) {
-                    provider.setControls(mode);
-                }
-            };
-
-            this.playerDestroy = function () {
-                this.stop();
-                _stopObserving();
-                this.showView(this.originalContainer);
-
-                if (_view) {
-                    _view.destroy();
-                }
-                if (_model) {
-                    _model.destroy();
-                }
-                if (_setup) {
-                    _setup.destroy();
-                    _setup = null;
-                }
-            };
-
-            this.isBeforePlay = this.checkBeforePlay;
-
-            this.isBeforeComplete = function () {
-                return _model.checkComplete();
-            };
-
-            this.createInstream = function() {
-                this.instreamDestroy();
-                this._instreamAdapter = new InstreamAdapter(this, _model, _view);
-                return this._instreamAdapter;
-            };
-
-            this.skipAd = function() {
-                if (this._instreamAdapter) {
-                    this._instreamAdapter.skipAd();
-                }
-            };
-
-            this.instreamDestroy = function() {
-                if (_this._instreamAdapter) {
-                    _this._instreamAdapter.destroy();
-                }
-            };
-
-            // Delegate trigger so we can run a middleware function before any event is bubbled through the API
-            this.trigger = function (type, args) {
-                var data = eventsMiddleware(_model, type, args);
-                return Events.trigger.call(this, type, data);
-            };
-
-            _setup.start();
-        },
-
-        showView: function(viewElement) {
-            if (!document.body.contains(this.currentContainer)) {
-                // This implies the player was removed from the DOM before setup completed
-                //   or a player has been "re" setup after being removed from the DOM
-                var newContainer = document.getElementById(this._model.get('id'));
-                if (newContainer) {
-                    this.currentContainer = newContainer;
-                }
-            }
-
-            if (this.currentContainer.parentElement) {
-                this.currentContainer.parentElement.replaceChild(viewElement, this.currentContainer);
-            }
-            this.currentContainer = viewElement;
-        },
-
-        triggerError: function(evt) {
-            this._model.set('errorEvent', evt);
-            this._model.set('state', states.ERROR);
-            this._model.once('change:state', function() {
-                this._model.set('errorEvent', undefined);
-            }, this);
-
-            this.trigger(events.JWPLAYER_ERROR, evt);
-        },
-
-        setupError: function(evt) {
-            var message = evt.message;
-            var errorElement = utils.createElement(error(this._model.get('id'), this._model.get('skin'), message));
-
-            var width = this._model.get('width');
-            var height = this._model.get('height');
-
-            utils.style(errorElement, {
-                width: width.toString().indexOf('%') > 0 ? width : (width + 'px'),
-                height: height.toString().indexOf('%') > 0 ? height : (height + 'px')
-            });
-
-            this.showView(errorElement);
-
-            var _this = this;
-            _.defer(function() {
-                _this.trigger(events.JWPLAYER_SETUP_ERROR, {
-                    message: message
-                });
+            _this.trigger(CAPTIONS_CHANGED, {
+                tracks: _getCaptionsList(),
+                track: index
             });
         }
-    };
 
-    return Controller;
+        function _getCurrentCaptions() {
+            return _captions.getCurrentIndex();
+        }
+
+        function _getCaptionsList() {
+            return _captions.getCaptionsList();
+        }
+
+        /* Used for the InStream API */
+        function _detachMedia() {
+            if (_beforePlay) {
+                _interruptPlay = true;
+            }
+
+            if (_model.get('autoPause').viewability) {
+                _checkPauseOnViewable(_model, _model.get('viewable'));
+            }
+
+            if (_backgroundLoading) {
+                _programController.backgroundActiveMedia();
+            } else {
+                _programController.attached = false;
+            }
+        }
+
+        function _attachMedia() {
+            // Called after instream ends
+
+            if (_backgroundLoading) {
+                _programController.restoreBackgroundMedia();
+            } else {
+                _programController.attached = true;
+            }
+
+            if (typeof _actionOnAttach === 'function') {
+                _actionOnAttach();
+            }
+        }
+
+        function _setFullscreen(state) {
+            if (!isBoolean(state)) {
+                state = !_model.get('fullscreen');
+            }
+
+            _model.set('fullscreen', state);
+            if (_this._instreamAdapter && _this._instreamAdapter._adModel) {
+                _this._instreamAdapter._adModel.set('fullscreen', state);
+            }
+        }
+
+        function addProgramControllerListeners() {
+            _programController
+                .on('all', _trigger, _this)
+                .on('subtitlesTracks', (e) => {
+                    _captions.setSubtitlesTracks(e.tracks);
+                    const defaultCaptionsIndex = _captions.getCurrentIndex();
+
+                    // set the current captions if the default index isn't 0 or "Off"
+                    if (defaultCaptionsIndex > 0) {
+                        _setCurrentCaptions(defaultCaptionsIndex);
+                    }
+                }, _this)
+                .on(MEDIA_COMPLETE, () => {
+                    // Insert a small delay here so that other complete handlers can execute
+                    Promise.resolve().then(_completeHandler);
+                }, _this)
+                .on(MEDIA_ERROR, _this.triggerError, _this);
+        }
+
+        function updateProgramSoundSettings() {
+            _programController.mute = _model.getMute();
+            _programController.volume = _model.get('volume');
+        }
+
+        this.preload = preload;
+
+        /* Controller API / public methods */
+        this.load = _load;
+        this.play = (meta) => _play(meta).catch(noop);
+        this.pause = _pause;
+        this.seek = _seek;
+        this.stop = _stop;
+        this.playlistItem = _item;
+        this.playlistNext = _next;
+        this.playlistPrev = _prev;
+        this.setCurrentCaptions = _setCurrentCaptions;
+        this.setCurrentQuality = _setCurrentQuality;
+        this.setFullscreen = _setFullscreen;
+        this.getCurrentQuality = _getCurrentQuality;
+        this.getQualityLevels = _getQualityLevels;
+        this.setCurrentAudioTrack = _setCurrentAudioTrack;
+        this.getCurrentAudioTrack = _getCurrentAudioTrack;
+        this.getAudioTracks = _getAudioTracks;
+        this.getCurrentCaptions = _getCurrentCaptions;
+        this.getCaptionsList = _getCaptionsList;
+        this.getVisualQuality = _getVisualQuality;
+        this.getConfig = _getConfig;
+        this.getState = _getState;
+        this.next = noop;
+        this.completeHandler = _completeHandler;
+        this.completeCancelled = _completeCancelled;
+        this.shouldAutoAdvance = _shouldAutoAdvance;
+        this.nextItem = () => {
+            _next({ reason: 'playlist' });
+        };
+        this.setConfig = (newConfig) => {
+            setConfig(_this, newConfig);
+        };
+        this.setItemIndex = (index) => {
+            _programController.stopVideo();
+
+            const playlist = _model.get('playlist');
+            const length = playlist.length;
+
+            // If looping past the end, or before the beginning
+            index = (parseInt(index, 10) || 0) % length;
+            if (index < 0) {
+                index += length;
+            }
+
+            return _programController.setActiveItem(index).catch(error => {
+                if (error.code >= 151 && error.code <= 162) {
+                    error = composePlayerError(error, ERROR_LOADING_PROVIDER);
+                }
+                this.triggerError(convertToPlayerError(MSG_CANT_PLAY_VIDEO, ERROR_LOADING_PLAYLIST_ITEM, error));
+            });
+        };
+        this.detachMedia = _detachMedia;
+        this.attachMedia = _attachMedia;
+
+        // Program Controller passthroughs
+        this.routeEvents = (target) => _programController.routeEvents(target);
+        this.forwardEvents = () => _programController.forwardEvents();
+        this.playVideo = (playReason) => _programController.playVideo(playReason);
+        this.stopVideo = () => _programController.stopVideo();
+        this.castVideo = (castProvider, item) => _programController.castVideo(castProvider, item);
+        this.stopCast = () => _programController.stopCast();
+        this.backgroundActiveMedia = () => _programController.backgroundActiveMedia();
+        this.restoreBackgroundMedia = () => _programController.restoreBackgroundMedia();
+        this.preloadNextItem = () => {
+            if (_programController.background.currentMedia) {
+                // Instruct the background media to preload if it's already been loaded
+                _programController.preloadVideo();
+            }
+        };
+        this.isBeforeComplete = () => _programController.beforeComplete;
+
+        // Model passthroughs
+        this.setVolume = (volume) => {
+            _model.setVolume(volume);
+            updateProgramSoundSettings();
+        };
+        this.setMute = (mute) => {
+            _model.setMute(mute);
+            updateProgramSoundSettings();
+        };
+        this.setPlaybackRate = (playbackRate) => {
+            _model.setPlaybackRate(playbackRate);
+        };
+        this.getProvider = () => _model.get('provider');
+        this.getWidth = () => _model.get('containerWidth');
+        this.getHeight = () => _model.get('containerHeight');
+        this.getItemQoe = () => _model._qoeItem;
+        this.addButton = function(img, tooltip, callback, id, btnClass) {
+            let customButtons = _model.get('customButtons') || [];
+            let replaced = false;
+            const newButton = {
+                img: img,
+                tooltip: tooltip,
+                callback: callback,
+                id: id,
+                btnClass: btnClass
+            };
+
+            customButtons = customButtons.reduce((buttons, button) => {
+                if (button.id === id) {
+                    replaced = true;
+                    buttons.push(newButton);
+                } else {
+                    buttons.push(button);
+                }
+                return buttons;
+            }, []);
+
+            if (!replaced) {
+                customButtons.unshift(newButton);
+            }
+
+            _model.set('customButtons', customButtons);
+        };
+        this.removeButton = function(id) {
+            let customButtons = _model.get('customButtons') || [];
+
+            customButtons = customButtons.filter(
+                (button) => button.id !== id
+            );
+
+            _model.set('customButtons', customButtons);
+        };
+
+        // View passthroughs
+        this.resize = _view.resize;
+        this.getSafeRegion = _view.getSafeRegion;
+        this.setCaptions = _view.setCaptions;
+
+        this.checkBeforePlay = function() {
+            return _beforePlay;
+        };
+
+        this.setControls = function (mode) {
+            if (!isBoolean(mode)) {
+                mode = !_model.get('controls');
+            }
+            _model.set('controls', mode);
+            _programController.controls = mode;
+        };
+
+        this.addCues = function (cues) {
+            this.setCues(_model.get('cues').concat(cues));
+        };
+
+        this.setCues = function (cues) {
+            _model.set('cues', cues);
+        };
+
+        this.updatePlaylist = function(playlist, feedData) {
+            try {
+                const filteredPlaylist = filterPlaylist(playlist, _model, feedData);
+
+                // Throw exception if playlist is empty
+                validatePlaylist(filteredPlaylist);
+
+                _model.set('feedData', feedData);
+                _model.set('playlist', filteredPlaylist);
+            } catch (error) {
+                return Promise.reject(error);
+            }
+            return this.setItemIndex(_model.get('item'));
+        };
+
+        this.setPlaylistItem = function (index, item) {
+            item = normalizePlaylistItem(_model, new Item(item), item.feedData || {});
+
+            if (item) {
+                const playlist = _model.get('playlist');
+                playlist[index] = item;
+
+                if (index === _model.get('item') && _model.get('state') === 'idle') {
+                    this.setItemIndex(index);
+                }
+            }
+        };
+
+        this.playerDestroy = function () {
+            this.off();
+            this.stop();
+            showView(this, this.originalContainer);
+            if (_view) {
+                _view.destroy();
+            }
+            if (_model) {
+                _model.destroy();
+            }
+            if (apiQueue) {
+                apiQueue.destroy();
+            }
+            if (_captions) {
+                _captions.destroy();
+            }
+            if (_programController) {
+                _programController.destroy();
+            }
+            this.instreamDestroy();
+        };
+
+        this.isBeforePlay = this.checkBeforePlay;
+
+        this.createInstream = function() {
+            this.instreamDestroy();
+            this._instreamAdapter = new InstreamAdapter(this, _model, _view, mediaPool);
+            return this._instreamAdapter;
+        };
+
+        this.skipAd = function() {
+            if (this._instreamAdapter) {
+                this._instreamAdapter.skipAd();
+            }
+        };
+
+        this.instreamDestroy = function() {
+            if (_this._instreamAdapter) {
+                _this._instreamAdapter.destroy();
+                _this._instreamAdapter = null;
+            }
+        };
+
+        // Setup ApiQueueDecorator after instance methods have been assigned
+        const apiQueue = new ApiQueueDecorator(this, [
+            'play',
+            'pause',
+            'setCurrentAudioTrack',
+            'setCurrentCaptions',
+            'setCurrentQuality',
+            'setFullscreen',
+        ], () => !this._model.get('itemReady') || eventsReadyQueue);
+        // Add commands from CoreLoader to queue
+        apiQueue.queue.push.apply(apiQueue.queue, commandQueue);
+
+        _view.setup();
+    },
+    get(property) {
+        if (property in INITIAL_MEDIA_STATE) {
+            const mediaModel = this._model.get('mediaModel');
+            if (mediaModel) {
+                return mediaModel.get(property);
+            }
+            return INITIAL_MEDIA_STATE[property];
+        }
+        return this._model.get(property);
+    },
+    getContainer() {
+        return this.currentContainer || this.originalContainer;
+    },
+    getMute() {
+        return this._model.getMute();
+    },
+    triggerError(evt) {
+        const model = this._model;
+        evt.message = model.get('localization').errors[evt.key];
+        delete evt.key;
+        model.set('errorEvent', evt);
+        model.set('state', STATE_ERROR);
+        model.once('change:state', function() {
+            this.set('errorEvent', undefined);
+        }, model);
+
+        this.trigger(ERROR, evt);
+    }
 });
+
+export default Controller;

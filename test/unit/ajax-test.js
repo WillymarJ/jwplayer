@@ -1,226 +1,267 @@
-define([
-    'test/underscore',
-    'utils/ajax'
-], function (_, utils) {
-    /* jshint qunit: true */
+import { ajax } from 'utils/ajax';
+import * as errors from 'api/errors';
 
-    QUnit.module('utils.ajax');
-    var test = QUnit.test.bind(QUnit);
+describe('utils.ajax', function() {
+    this.timeout(8000);
 
-    function validXHR(xhr) {
-        if ('XDomainRequest' in window && xhr instanceof window.XDomainRequest) {
-            return true;
-        }
-        return xhr instanceof window.XMLHttpRequest;
+    function validateXHR(xhr) {
+        expect(xhr).to.be.instanceOf(window.XMLHttpRequest);
     }
 
-    QUnit.skip('legacy params', function (assert) {
-        var done = assert.async();
+    function expectSuccess(options) {
+        return new Promise((resolve, reject) => {
+            options.oncomplete = (result) => {
+                resolve({
+                    result,
+                    xhr
+                });
+            };
+            options.onerror = (message, url, result) => {
+                reject(new Error(`Expected request to return OK status 200. ` +
+                    `Got ${result.status} "${message}" ${url}`));
+            };
+            const xhr = ajax(options);
+        });
+    }
 
-        var uri = require.toUrl('./data/playlist.xml');
+    function expectError(options, successHandler) {
+        return new Promise((resolve, reject) => {
+            options.oncomplete = (result) => {
+                reject(successHandler(result));
+            };
+            options.onerror = (key, url, result, error) => {
+                resolve({
+                    key,
+                    url,
+                    result,
+                    error
+                });
+            };
+            ajax(options);
+        });
+    }
 
-        var xhr = utils.ajax(uri,
-            function success(xhrResult) {
-                assert.strictEqual(xhrResult, xhr,
-                    'success callback expects the result be the xhr instance');
-                assert.ok(xhrResult.responseText,
-                    'success callback expects the result to have responseText');
-                assert.ok(xhrResult.responseXML,
-                    'success callback expects the result to have responseXML for XML content');
-                assert.equal(xhrResult.status, 200,
-                    'success callback expects that the result status was 200');
-                done();
-
-            },
-            function error(message, requestUrl, xhrResult) {
-                assert.ok(false, message, requestUrl, xhrResult);
-                done();
-            },
-            true
-        );
-        assert.ok(validXHR(xhr),
-            'utils.ajax returns an XMLHttpRequest instance');
+    it('uses default mimetype "text/xml" with legacy boolean argument', function () {
+        return new Promise((resolve, reject) => {
+            const xhr = ajax('/base/test/files/playlist.xml',
+                function success(result) {
+                    resolve({
+                        result,
+                        xhr
+                    });
+                },
+                function error(message, requestUrl, xhrResult) {
+                    reject(new Error(`Expected request to return OK status 200. ` +
+                        `Got ${xhrResult.status} "${message}" ${requestUrl}`));
+                },
+                true
+            );
+            validateXHR(xhr);
+        }).then(({ result, xhr }) => {
+            expect(result).to.equal(xhr);
+            expect(result).to.have.property('responseText').which.is.a('string').and.has.lengthOf(2401);
+            expect(result).to.have.property('responseXML').which.does.not.equal(undefined);
+            expect(result).to.have.property('status').which.equals(200);
+        });
     });
 
-    QUnit.skip('responseType "text"', function (assert) {
-        var done = assert.async();
-
-        var uri = require.toUrl('./data/playlist.json');
-
-        var xhr = utils.ajax({
-            url: uri,
-            oncomplete: function(xhrResult) {
-                assert.ok(xhrResult.responseText,
-                    'success callback expects the the result to have responseText');
-                done();
-            },
-            onerror: function(message, requestUrl, xhrResult) {
-                assert.ok(false, message, requestUrl, xhrResult);
-                done();
-            },
+    it('supports responseType "text" argument', function () {
+        return expectSuccess({
+            url: '/base/test/files/playlist.xml',
             responseType: 'text'
+        }).then(({ result, xhr }) => {
+            validateXHR(xhr);
+            expect(result).to.have.property('responseText').which.is.a('string').and.has.lengthOf(2401);
+            expect(result).to.have.property('status').which.equals(200);
         });
-        assert.ok(validXHR(xhr),
-            'utils.ajax returns an XMLHttpRequest instance');
     });
 
-    QUnit.skip('responseType "json"', function (assert) {
-        var done = assert.async();
-
-        var uri = require.toUrl('./data/playlist.json');
-
-        var xhr = utils.ajax({
-            url: uri,
-            oncomplete: function(xhrResult) {
-
-                assert.ok(_.isArray(xhrResult.response) && xhrResult.response[0].file,
-                    'xhr.response is parsed JSON');
-
-                done();
-            },
-            onerror: function(message, requestUrl, xhrResult) {
-                assert.ok(false, message, requestUrl, xhrResult);
-                done();
-            },
+    it('supports responseType "json" argument', function () {
+        return expectSuccess({
+            url: '/base/test/files/playlist.json',
             responseType: 'json'
+        }).then(({ result, xhr }) => {
+            validateXHR(xhr);
+            expect(result).to.have.property('response').which.is.an('array').and.has.lengthOf(2);
+            expect(result.response[0]).to.have.property('file')
+                .which.equals('http://content.bitsontherun.com/videos/3XnJSIm4-52qL9xLP.mp4');
         });
-        assert.ok(validXHR(xhr),
-            'utils.ajax returns an XMLHttpRequest instance');
     });
 
-    QUnit.skip('timeout', function (assert) {
-        var done = assert.async();
-        var nonce = Math.random().toFixed(20).substr(2);
+    it('supports timeout argument', function () {
+        const errorKey = errors.MSG_TECHNICAL_ERROR;
+        const nonce = Math.random().toFixed(20).substr(2);
 
-        utils.ajax({
-            url: 'http://playertest.longtailvideo.com/vast/preroll.xml?n=' + nonce,
-            oncomplete: function(xhrResult) {
-                assert.notOk(xhrResult.responseText, 'What?');
-                assert.ok(false, 'expected request to timeout immediately');
-                done();
-            },
-            onerror: function(message) {
-                assert.equal(message, 'Timeout',
-                    '"Timeout" error message');
-                done();
-            },
+        return expectError({
+            url: '//playertest.longtailvideo.com/vast/preroll.xml?n=' + nonce,
             timeout: 0.0001,
             responseType: 'text'
+        }, success => {
+            return new Error(`Expected XHR request to timeout. It succeeded with status ${success.status}.`);
+        }).then(({ key, url, result, error }) => {
+            expect(key).to.equal(errorKey);
+            expect(url).to.be.a('string');
+            validateXHR(result);
+            expect(result).to.have.property('status').which.equals(0);
+            expect(error).to.have.property('key').which.equals(errorKey);
+            expect(error).to.have.property('code').which.equals(1);
+            expect(error).to.have.property('sourceError').which.equals(null);
         });
     });
 
-    QUnit.skip('withCredentials', function (assert) {
-        var done = assert.async();
-
-        utils.ajax({
-            url: require.toUrl('./data/playlist.json'),
-            oncomplete: function(xhrResult) {
-                if ('withCredentials' in xhrResult) {
-                    assert.ok(xhrResult.withCredentials, 'xhr result has withCredentials set to true');
-                } else {
-                    assert.ok(true, 'withCredentials is not available in this browser');
-                }
-                done();
-            },
-            onerror: function() {
-                assert.ok(false, 'request failed withCredentials');
-                done();
-            },
+    it('supports withCredentials argument', function () {
+        return expectSuccess({
+            url: '/base/test/files/playlist.json',
             withCredentials: true,
             responseType: 'text'
+        }).then(({ result }) => {
+            if ('withCredentials' in result) {
+                expect(result).to.have.property('withCredentials').which.equals(true);
+            } else {
+                assert.isOk(true, 'withCredentials is not available in this browser');
+            }
         });
     });
 
-    QUnit.skip('withCredentials crossdomain', function (assert) {
-        var done = assert.async();
-
-        utils.ajax({
-            url: require.toUrl('./data/playlist.xml'),
-            oncomplete: function(xhrResult) {
-                if (xhrResult.withCredentials === false) {
-                    assert.ok(true,
-                        'a second crossdomain requests without credentials is made');
-                } else {
-                    assert.ok(true,
-                        'the first crossdomain request with credentials succeeded');
-                }
-                assert.ok(xhrResult.responseXML.firstChild,
-                    'xml was returned');
-                done();
-            },
-            onerror: function() {
-                assert.ok(false, 'crossdomain request failed withCredentials and retryWithoutCredentials');
-                done();
-            },
+    it('supports retryWithoutCredentials argument', function () {
+        return expectSuccess({
+            url: 'https://cdn.jwplayer.com/v2/playlists/r1AALLcN?format=mrss',
             withCredentials: true,
             retryWithoutCredentials: true,
             requireValidXML: true
+        }).then(({ result, xhr }) => {
+            expect(result, 'A second XHR instance is created to re-request without credentials').to.not.equal(xhr);
+            expect(result)
+                .to.have.property('withCredentials')
+                .which.is.a('boolean')
+                .which.equals(false);
+            expect(result.responseText)
+                .to.be.a('string');
+            expect(result.status)
+                .to.equal(200);
+            expect(result.responseXML)
+                .to.have.property('firstChild')
+                .which.does.not.equal(undefined);
         });
     });
 
-    QUnit.skip('error "Error loading file" (bad request)', function (assert) {
-        var done = assert.async();
-
-        utils.ajax({
-            onerror: function() {
-                assert.ok(true, 'missing url param results in  "Error loading file" error');
-                done();
-            }
+    it('supports a custom xhr argument', function () {
+        const customXhr = new window.XMLHttpRequest();
+        return expectSuccess({
+            xhr: customXhr,
+            url: '/base/test/files/playlist.json'
+        }).then(({ result, xhr }) => {
+            expect(xhr).to.equal(customXhr);
+            expect(result).to.equal(customXhr);
+            expect(result.status).to.equal(200);
         });
     });
 
-    QUnit.skip('error "Invalid XML"', function (assert) {
-        var done = assert.async();
+    it('supports a requestFilter xhr argument', function () {
+        const customXhr = new window.XMLHttpRequest();
+        return expectSuccess({
+            requestFilter: function(request) {
+                expect(request).to.have.property('url').which.equals('/base/test/files/playlist.json');
+                expect(request).to.have.property('xhr');
+                return customXhr;
+            },
+            url: '/base/test/files/playlist.json'
+        }).then(({ result, xhr }) => {
+            expect(xhr).to.equal(customXhr);
+            expect(result).to.equal(customXhr);
+            expect(result.status).to.equal(200);
+        });
+    });
 
-        utils.ajax({
-            url: require.toUrl('./data/invalid.xml'),
-            oncomplete: function(xhrResult) {
-                assert.notOk(xhrResult.responseXML, 'What?');
-                assert.ok(false, 'expected error callback with invalid "Invalid XML"');
-                done();
+    it('handles bad request exceptions', function () {
+        const errorKey = errors.MSG_CANT_PLAY_VIDEO;
+
+        return expectError({}, success => {
+            return new Error(`Expected bad request to fail with "Error loading file". Got ${success.status}`);
+        }).then(({ key, url, result, error }) => {
+            expect(key).to.equal(errorKey);
+            expect(url).to.equal(undefined);
+            expect(result.status).to.equal(0);
+            expect(error).to.have.property('key').which.equals(errorKey);
+            expect(error).to.have.property('code').which.equals(3);
+            expect(error).to.have.property('sourceError').which.does.not.equal(null);
+        });
+    });
+
+    it('handles requestFilter exceptions', function () {
+        const errorKey = errors.MSG_CANT_PLAY_VIDEO;
+        const url = '/base/test/files/playlist.json';
+
+        return expectError({
+            requestFilter: function() {
+                throw new Error('Bad request filter');
             },
-            onerror: function(message) {
-                assert.equal(message, 'Invalid XML',
-                    '"Invalid XML" error message');
-                done();
-            },
+            url
+        }, success => {
+            return new Error(`Expected bad filter to fail with "Error loading file". Got ${success.status}`);
+        }).then(({ key, url: u, result, error }) => {
+            expect(key).to.equal(errorKey);
+            expect(u).to.equal(url);
+            expect(result.status).to.equal(0);
+            expect(error).to.have.property('key').which.equals(errorKey);
+            expect(error).to.have.property('code').which.equals(5);
+            expect(error).to.have.property('sourceError').which.does.not.equal(null);
+        });
+    });
+
+    it('error "Invalid XML"', function () {
+        const errorKey = errors.MSG_CANT_PLAY_VIDEO;
+        const url = '/base/test/files/invalid.xml';
+
+        return expectError({
+            url,
             requireValidXML: true
+        }, success => {
+            return new Error(`Expected bad request to fail with "Invalid XML". Got ${success.status}`);
+        }).then(({ key, url: u, result, error }) => {
+            expect(key).to.equal(errorKey);
+            expect(u).to.equal(url);
+            expect(result.status).to.equal(200);
+            expect(error).to.have.property('key').which.equals(errorKey);
+            expect(error).to.have.property('code').which.equals(602);
+            expect(error).to.have.property('sourceError').which.equals(null);
         });
     });
 
-    QUnit.skip('error "Invalid JSON"', function (assert) {
-        var done = assert.async();
+    it('error "Invalid JSON"', function () {
+        const errorKey = errors.MSG_CANT_PLAY_VIDEO;
+        const url = '/base/test/files/invalid.xml';
 
-        utils.ajax({
-            url: require.toUrl('./data/invalid.xml'),
-            oncomplete: function() {
-                assert.ok(false, 'expected error callback with invalid "Invalid JSON"');
-                done();
-            },
-            onerror: function(message) {
-                assert.equal(message, 'Invalid JSON',
-                    '"Invalid JSON" error message');
-                done();
-            },
+        return expectError({
+            url,
             responseType: 'json'
+        }, success => {
+            return new Error(`Expected bad request to fail with "Invalid JSON". Got ${success.status}`);
+        }).then(({ key, url: u, result, error }) => {
+            expect(key).to.equal(errorKey);
+            expect(u).to.equal(url);
+            expect(result.status).to.equal(200);
+            expect(error).to.have.property('key').which.equals(errorKey);
+            expect(error).to.have.property('code').which.equals(611);
+            expect(error).to.have.property('sourceError').which.does.not.equal(null);
         });
     });
 
-    QUnit.skip('error "File not found" (404) - Integration Test', function (assert) {
-        var done = assert.async();
+    it('error "File not found" (404) - Integration Test', function () {
+        const errorKey = errors.MSG_CANT_PLAY_VIDEO;
+        const url = 'foobar';
 
-        utils.ajax({
-            url: 'foobar',
-            oncomplete: function() {
-                assert.ok(false, 'expected error callback with invalid "File not found"');
-                done();
-            },
-            onerror: function(message) {
-                assert.equal(message, 'File not found',
-                    '"File not found" error message');
-                done();
-            }
+        return expectError({
+            url
+        }, success => {
+            return new Error(`Expected bad request to fail with "File not found". Got ${success.status}`);
+        }).then(({ key, url: u, result, error }) => {
+            expect(key).to.equal(errorKey);
+            expect(u).to.equal(url);
+            expect(result.status).to.equal(404);
+            expect(error).to.have.property('key').which.equals(errorKey);
+            expect(error).to.have.property('code').which.equals(404);
+            expect(error).to.have.property('sourceError').which.equals(null);
         });
     });
-
 });

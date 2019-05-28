@@ -2,24 +2,37 @@
     "root": true,
     "env": {
         "browser": true,
-        "amd": true,
-        "es6": true
+        "es6": true,
+        "commonjs": true
     },
     "globals": {
-        "__webpack_public_path__": true,
-        "Promise": true,
-        "Uint8Array": true,
-        "__FLASH_VERSION__": true,
-        "__REPO__": true,
-        "__SELF_HOSTED__": true,
-        "__DEBUG__": true,
-        "__BUILD_VERSION__": true
+        "__webpack_public_path__": false,
+        "__FLASH_VERSION__": false,
+        "__REPO__": false,
+        "__SELF_HOSTED__": false,
+        "__DEBUG__": false,
+        "__BUILD_VERSION__": false
     },
     "parserOptions": {
         "sourceType": "module"
     },
     "extends": "eslint:recommended",
+    "plugins": [
+        "no-for-of-loops",
+        "no-unsanitized"
+    ],
     "rules": {
+        "valid-jsdoc": 2,
+        "no-restricted-globals": [
+            "error",
+            {
+                "name": "VTTCue",
+                "message": "import VTTCue from 'parsers/captions/vttcue'"
+            }
+        ],
+        "no-for-of-loops/no-for-of-loops": 2,
+        "no-unsanitized/method": 2,
+        "no-unsanitized/property": 2,
         "comma-dangle": 0,
         "no-cond-assign": 2,
         "no-console": ["warn", { "allow": ["warn", "error"] }],
@@ -87,6 +100,7 @@
         "no-sequences": 2,
         "no-throw-literal": 2,
         "no-unused-expressions": 1,
+        "no-var": 2,
         "no-void": 2,
         "no-warning-comments": [0, {"terms": ["todo", "fixme"], "location": "start"}],
         "no-with": 2,
@@ -105,7 +119,7 @@
         "indent": [1, 4, {"SwitchCase":1}],
         "brace-style": 1,
         "camelcase": 1,
-        "comma-spacing": [1, {"before": false, "after": true}],
+        "comma-spacing": [2, {"before": false, "after": true}],
         "comma-style": [1, "last"],
         "consistent-this": [0, "_this"],
         "eol-last": 1,

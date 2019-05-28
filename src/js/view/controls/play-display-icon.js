@@ -1,53 +1,57 @@
-import displayIconTemplate from 'view/controls/templates/display-icon';
+import Events from 'utils/backbone.events';
+import UI from 'utils/ui';
+import { addClass, createElement } from 'utils/dom';
 
-define([
-    'utils/helpers',
-    'utils/backbone.events',
-    'utils/ui',
-    'utils/underscore'
-], function(utils, Events, UI, _) {
+export default class PlayDisplayIcon extends Events {
+    constructor(_model, api, element) {
+        super();
+        const localization = _model.get('localization');
+        const iconDisplay = element.querySelector('.jw-icon');
 
-    return class PlayDisplayIcon {
-        constructor(_model) {
-            _.extend(this, Events);
-            this.model = _model;
+        this.icon = iconDisplay;
+        this.el = element;
+        this.ui = new UI(iconDisplay).on('click tap enter', (evt) => {
+            this.trigger(evt.type);
+        });
 
-            this.el = utils.createElement(displayIconTemplate('display', this.model.get('localization').playback));
+        _model.on('change:state', (model, newState) => {
+            let newStateLabel;
+            switch (newState) {
+                case 'buffering':
+                    newStateLabel = localization.buffer;
+                    break;
+                case 'playing':
+                    newStateLabel = localization.pause;
+                    break;
+                case 'idle':
+                case 'paused':
+                    newStateLabel = localization.playback;
+                    break;
+                case 'complete':
+                    newStateLabel = localization.replay;
+                    break;
+                default:
+                    newStateLabel = '';
+                    break;
+            }
+            if (newStateLabel !== '') {
+                iconDisplay.setAttribute('aria-label', newStateLabel);
+            } else {
+                iconDisplay.removeAttribute('aria-label');
+            }
+        });
 
-            this.iconUI = new UI(this.el).on('click tap', (evt) => {
-                this.trigger(evt.type);
-            });
-
-            this.model.on('change:state', (model, newstate) => {
-                var iconDisplay = this.el.getElementsByClassName('jw-icon-display');
-                if (iconDisplay.length) {
-                    var localization = this.model.get('localization');
-                    var newstateLabel = localization.playback;
-                    switch (newstate) {
-                        case 'buffering':
-                            newstateLabel = localization.buffer;
-                            break;
-                        case 'playing':
-                            newstateLabel = localization.pause;
-                            break;
-                        case 'complete':
-                            newstateLabel = localization.replay;
-                            break;
-                        default:
-                            newstateLabel = '';
-                            break;
-                    }
-                    if (newstateLabel === '') {
-                        iconDisplay[0].removeAttribute('aria-label');
-                    } else {
-                        iconDisplay[0].setAttribute('aria-label', newstateLabel);
-                    }
-                }
-            });
+        if (_model.get('displayPlaybackLabel')) {
+            let iconText = this.icon.getElementsByClassName('jw-idle-icon-text')[0];
+            if (!iconText) {
+                iconText = createElement(`<div class="jw-idle-icon-text">${localization.playback}</div>`);
+                addClass(this.icon, 'jw-idle-label');
+                this.icon.appendChild(iconText);
+            }
         }
+    }
 
-        element() {
-            return this.el;
-        }
-    };
-});
+    element() {
+        return this.el;
+    }
+}

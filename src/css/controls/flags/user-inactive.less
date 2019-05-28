@@ -1,11 +1,11 @@
-@import "../../shared-imports/vars";
-@import "controls-hidden";
+@import "../../shared-imports/vars.less";
+@import "controls-hidden.less";
 
 .jwplayer.jw-flag-user-inactive:not(.jw-flag-media-audio) {
     &.jw-state-playing {
         .jwplayer.jw-flag-controls-hidden;
 
-        .jw-media {
+        &:not(.jw-flag-controls-hidden) .jw-media {
             cursor: none;
             /* cursor hiding on media elements for Safari */
             -webkit-cursor-visibility: auto-hide;
@@ -15,20 +15,18 @@
             .jw-display {
                 display: table;
             }
+        }
 
-            .jw-dock {
-                display: block;
+        &:not(.jw-flag-ads) {
+            .jw-autostart-mute {
+                display: flex;
             }
         }
     }
 
     &.jw-flag-casting {
         .jw-nextup-container {
-            bottom: @controlbar-height;
-        }
-
-        &.jw-flag-time-slider-above .jw-nextup-container {
-            bottom: @mobile-touch-target * 1.5;
+            bottom: (@mobile-touch-target * 1.5);
         }
 
         &.jw-state-idle {

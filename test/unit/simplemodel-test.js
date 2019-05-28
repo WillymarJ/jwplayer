@@ -1,21 +1,41 @@
-define([
-    'utils/simplemodel',
-    'utils/underscore'
-], function (simpleModel, _) {
-    /* jshint qunit: true */
+import sinon from 'sinon';
+import SimpleModel from 'model/simplemodel';
 
-    QUnit.module('simpleModel');
+describe('SimpleModel Mixin', function() {
 
-    QUnit.test('simplemodel', function(assert) {
-        var model = _.extend({}, simpleModel);
-        assert.notOk(model.get('noExisting'), 'get with no attributes');
+    const model = new SimpleModel();
 
-        model.set('attr', 'val');
-        assert.equal(model.get('attr'), 'val', 'set attribute with value');
-
-        var clone = model.clone();
-        assert.equal(clone.attr, 'val', 'clone gets the same attributes');
+    it('returns undefined ', function() {
+        expect(model.get('noExisting'), 'get with no attributes').to.be.undefined;
     });
 
+    it('simplemodel', function() {
+        expect(model.get('noExisting'), 'get with no attributes').to.be.undefined;
 
+        model.set('attr', 'val');
+        expect(model.get('attr'), 'set attribute with value').to.equal('val');
+
+        const clone = model.clone();
+        expect(clone.attr, 'clone gets the same attributes').to.equal('val');
+
+        const spy = sinon.spy();
+        model.change('attr', spy);
+        expect(spy.callCount, 'change callback is invoked').to.equal(1);
+        expect(spy.lastCall.args[1], 'change attribute with value').to.equal('val');
+    });
+
+    it('simplemodel', function() {
+        expect(model.get('noExisting'), 'get with no attributes').to.be.undefined;
+
+        model.set('attr', 'val');
+        expect(model.get('attr'), 'set attribute with value').to.equal('val');
+
+        const clone = model.clone();
+        expect(clone.attr, 'clone gets the same attributes').to.equal('val');
+
+        const spy = sinon.spy();
+        model.change('attr', spy);
+        expect(spy.callCount, 'change callback is invoked').to.equal(1);
+        expect(spy.lastCall.args[1], 'change attribute with value').to.equal('val');
+    });
 });
